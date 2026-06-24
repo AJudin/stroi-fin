@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,15 +6,29 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle, Building2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
-  const { login, isLoading, error } = useAuth();
+  const { login, user, isLoading, error } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState('admin@company.local');
   const [password, setPassword] = useState('');
 
+  // Redirect already authenticated users away from login page
+  useEffect(() => {
+    if (user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await login(email, password);
+    try {
+      await login(email, password);
+      navigate('/', { replace: true });
+    } catch {
+      // error is already set in AuthContext
+    }
   };
 
   return (
