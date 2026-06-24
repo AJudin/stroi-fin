@@ -1,0 +1,199 @@
+import { useState, useEffect } from 'react';
+import type { Project, Operation } from '@/types';
+import { mockService } from '@/lib/mockService';
+import { useAuth } from '@/context/AuthContext';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Plus, Eye, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
+export default function Projects() {
+  const { user } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [counterparties, setCounterparties] = useState<{ id: string; name: string }[]>([]);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+
+  const isAdmin = user?.role === 'admin';
+  const isManager = user?.role === 'project_manager';
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  async function loadData() {
+    const [prjs, ops, contrs] = await Promise.all([
+      mockService.getProjects(),
+      mockService.getOperations(),
+      mockService.getCounterparties(),
+    ]);
+    setProjects(prjs);
+    setOperations(ops);
+    setCounterparties(contrs.map(c => ({ id: c.id, name: c.name })));
+  }
+
+  const getProjectBalance = (projectId: string, view: string) => {
+    const ops = operations.filter(o => o.project_id === projectId && o.view === view && !o.is_archived);
+    const income = ops.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
+    const expense = ops.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
+    return income - expense;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-800">Проекты</h1>
+        {(isAdmin || isManager) && (
+          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"
+            onClick={() => { setEditingProject(null); setIsFormOpen(true); }}>
+            <Plus className="w-4 h-4 mr-1" /> Новый проект
+          </Button>
+        )}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Проект</TableHead>
+                <TableHead>Заказчик</TableHead>
+                <TableHead className="text-right">Упр. учёт</TableHead>
+                <TableHead className="text-right">Актирование</TableHead>
+                <TableHead className="text-right">Касса</TableHead>
+                <TableHead>Сроки</TableHead>
+                <TableHead className="w-20"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map(p => (
+                <TableRow key={p.id} className="hover:bg-slate-50">
+                  <TableCell className="font-medium">{p.name}</TableCell>
+                  <TableCell>{p.counterparty_name}</TableCell>
+                  <TableCell className={`text-right font-mono ${getProjectBalance(p.id, 'Управленческий учёт') >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {getProjectBalance(p.id, 'Управленческий учёт').toLocaleString('ru-RU')} ₽
+                  </TableCell>
+                  <TableCell className={`text-right font-mono ${getProjectBalance(p.id, 'Актирование') >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {getProjectBalance(p.id, 'Актирование').toLocaleString('ru-RU')} ₽
+                  </TableCell>
+                  <TableCell className={`text-right font-mono ${getProjectBalance(p.id, 'Касса') >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {getProjectBalance(p.id, 'Касса').toLocaleString('ru-RU')} ₽
+                  </TableCell>
+                  <TableCell className="text-sm text-slate-500">
+                    {new Date(p.start_date).toLocaleDateString('ru-RU')} — {new Date(p.end_date).toLocaleDateString('ru-RU')}
+                  </TableCell>
+                  <TableCell>
+                    <Link to={`/projects/${p.id}`}>
+                      <Button variant="ghost" size="sm" className="gap-1">
+                        <Eye className="w-4 h-4" /> <ArrowRight className="w-3 h-3" />
+                      </Button>
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {projects.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-slate-400 py-12">Нет проектов</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <ProjectFormDialog
+        open={isFormOpen}
+        onClose={() => { setIsFormOpen(false); setEditingProject(null); }}
+        project={editingProject}
+        counterparties={counterparties}
+        onSaved={loadData}
+      />
+    </div>
+  );
+}
+
+function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
+  {
+    open: boolean; onClose: () => void; project: Project | null;
+    counterparties: { id: string; name: string }[];
+    onSaved: () => void;
+  }) {
+  const [name, setName] = useState(project?.name || '');
+  const [counterpartyId, setCounterpartyId] = useState(project?.counterparty_id || '');
+  const [startDate, setStartDate] = useState(project?.start_date || '');
+  const [endDate, setEndDate] = useState(project?.end_date || '');
+  const [totalCost, setTotalCost] = useState(project?.total_cost?.toString() || '');
+  const [contractNumber, setContractNumber] = useState(project?.contracts?.[0]?.number || '');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const data = {
+      name, counterparty_id: counterpartyId,
+      start_date: startDate, end_date: endDate,
+      total_cost: parseFloat(totalCost) || 0,
+      contracts: contractNumber ? [{ id: `ct_${Date.now()}`, number: contractNumber, status: 'Не подписан' as const, amount: parseFloat(totalCost) || 0 }] : [],
+    };
+    if (project) {
+      await mockService.updateProject(project.id, data);
+    } else {
+      await mockService.createProject(data);
+    }
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{project ? 'Редактирование проекта' : 'Новый проект'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          <div className="space-y-1.5">
+            <Label>Название проекта</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} required />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Заказчик</Label>
+            <Select value={counterpartyId} onValueChange={setCounterpartyId}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {counterparties.map(c => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Дата старта</Label>
+              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} required />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Дата окончания</Label>
+              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} required />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>№ договора</Label>
+            <Input value={contractNumber} onChange={e => setContractNumber(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Стоимость (₽)</Label>
+            <Input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} required />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700">Сохранить</Button>
+            <Button type="button" variant="outline" onClick={onClose}>Отмена</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
