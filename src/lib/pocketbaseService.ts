@@ -213,7 +213,7 @@ export const pocketbaseService = {
   getProjects: async (): Promise<Project[]> => {
     const res = await pb.collection('projects').getFullList({
       expand: 'counterparty_id',
-      sort: '-created',
+      sort: '-start_date',
     });
     return res.map(mapProject);
   },
