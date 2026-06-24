@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import type { Project, Operation, Planning, Counterparty, Category, Stage } from '@/types';
-import { mockService } from '@/lib/mockService';
+import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,12 +43,12 @@ export default function ProjectDetail() {
   async function loadData() {
     if (!id) return;
     const [prj, ops, plan, contrs, cats, sts] = await Promise.all([
-      mockService.getProject(id),
-      mockService.getOperations({ project_id: id }),
-      mockService.getPlanning(id),
-      mockService.getCounterparties(),
-      mockService.getCategories(id),
-      mockService.getStages(id),
+      pocketbaseService.getProject(id),
+      pocketbaseService.getOperations({ project_id: id }),
+      pocketbaseService.getPlanning(id),
+      pocketbaseService.getCounterparties(),
+      pocketbaseService.getCategories(id),
+      pocketbaseService.getStages(id),
     ]);
     setProject(prj);
     setOperations(ops);
@@ -305,7 +305,7 @@ export default function ProjectDetail() {
                           {(isAdmin || isManager) && (
                             <TableCell>
                               <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
-                                onClick={async () => { await mockService.deletePlanning(p.id); await loadData(); }}>
+                                onClick={async () => { await pocketbaseService.deletePlanning(p.id); await loadData(); }}>
                                 <Archive className="w-3.5 h-3.5" />
                               </Button>
                             </TableCell>
@@ -375,7 +375,7 @@ function QuickOpForm({ projectId, counterparties, categories, _stages, onSaved, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await mockService.createOperation({
+    await pocketbaseService.createOperation({
       date, project_id: projectId, view, type,
       counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
       comment, amount: parseFloat(amount),
@@ -442,7 +442,7 @@ function QuickPlanForm({ projectId, categories, _stages, onSaved, onClose }:
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await mockService.createPlanning({ date, project_id: projectId, type, category, stage_id: stageId, amount: parseFloat(amount), comment });
+    await pocketbaseService.createPlanning({ date, project_id: projectId, type, category, stage_id: stageId, amount: parseFloat(amount), comment });
     onSaved();
     onClose();
   };

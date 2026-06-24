@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Counterparty, Category, Stage, Project } from '@/types';
-import { mockService } from '@/lib/mockService';
+import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,10 +32,10 @@ export default function References() {
 
   async function loadData() {
     const [cp, cats, sts, prjs] = await Promise.all([
-      mockService.getAllCounterparties(),
-      mockService.getAllCategories(),
-      mockService.getAllStages(),
-      mockService.getProjects(),
+      pocketbaseService.getAllCounterparties(),
+      pocketbaseService.getAllCategories(),
+      pocketbaseService.getAllStages(),
+      pocketbaseService.getProjects(),
     ]);
     setCounterparties(cp);
     setCategories(cats);
@@ -44,16 +44,16 @@ export default function References() {
   }
 
   const handleArchive = async (id: string, collection: string) => {
-    if (collection === 'counterparties') await mockService.updateCounterparty(id, { is_archived: true });
-    else if (collection === 'categories') await mockService.updateCategory(id, { is_archived: true });
-    else if (collection === 'stages') await mockService.updateStage(id, { is_archived: true });
+    if (collection === 'counterparties') await pocketbaseService.updateCounterparty(id, { is_archived: true });
+    else if (collection === 'categories') await pocketbaseService.updateCategory(id, { is_archived: true });
+    else if (collection === 'stages') await pocketbaseService.updateStage(id, { is_archived: true });
     await loadData();
   };
 
   const handleRestore = async (id: string, collection: string) => {
-    if (collection === 'counterparties') await mockService.updateCounterparty(id, { is_archived: false });
-    else if (collection === 'categories') await mockService.updateCategory(id, { is_archived: false });
-    else if (collection === 'stages') await mockService.updateStage(id, { is_archived: false });
+    if (collection === 'counterparties') await pocketbaseService.updateCounterparty(id, { is_archived: false });
+    else if (collection === 'categories') await pocketbaseService.updateCategory(id, { is_archived: false });
+    else if (collection === 'stages') await pocketbaseService.updateStage(id, { is_archived: false });
     await loadData();
   };
 
@@ -261,14 +261,14 @@ function ReferenceFormDialog({ open, onClose, item, activeTab, projects, onSaved
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formType === 'counterparty') {
-      if (item) await mockService.updateCounterparty(item.id, { name, inn, type });
-      else await mockService.createCounterparty({ name, inn, type, is_archived: false });
+      if (item) await pocketbaseService.updateCounterparty(item.id, { name, inn, type });
+      else await pocketbaseService.createCounterparty({ name, inn, type, is_archived: false });
     } else if (formType === 'category') {
-      if (item) await mockService.updateCategory(item.id, { name, type: categoryType, project_id: projectId });
-      else await mockService.createCategory({ name, type: categoryType, project_id: projectId, is_archived: false });
+      if (item) await pocketbaseService.updateCategory(item.id, { name, type: categoryType, project_id: projectId });
+      else await pocketbaseService.createCategory({ name, type: categoryType, project_id: projectId, is_archived: false });
     } else if (formType === 'stage') {
-      if (item) await mockService.updateStage(item.id, { name, order: parseInt(order), project_id: projectId });
-      else await mockService.createStage({ name, order: parseInt(order), project_id: projectId, is_archived: false });
+      if (item) await pocketbaseService.updateStage(item.id, { name, order: parseInt(order), project_id: projectId });
+      else await pocketbaseService.createStage({ name, order: parseInt(order), project_id: projectId, is_archived: false });
     }
     onSaved();
     onClose();

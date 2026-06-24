@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { Project, Operation } from '@/types';
-import { mockService } from '@/lib/mockService';
+import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,9 +29,9 @@ export default function Projects() {
 
   async function loadData() {
     const [prjs, ops, contrs] = await Promise.all([
-      mockService.getProjects(),
-      mockService.getOperations(),
-      mockService.getCounterparties(),
+      pocketbaseService.getProjects(),
+      pocketbaseService.getOperations(),
+      pocketbaseService.getCounterparties(),
     ]);
     setProjects(prjs);
     setOperations(ops);
@@ -140,9 +140,9 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
       contracts: contractNumber ? [{ id: `ct_${Date.now()}`, number: contractNumber, status: 'Не подписан' as const, amount: parseFloat(totalCost) || 0 }] : [],
     };
     if (project) {
-      await mockService.updateProject(project.id, data);
+      await pocketbaseService.updateProject(project.id, data);
     } else {
-      await mockService.createProject(data);
+      await pocketbaseService.createProject(data);
     }
     onSaved();
     onClose();

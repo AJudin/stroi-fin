@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { Operation } from '@/types';
-import { mockService } from '@/lib/mockService';
+import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,11 +36,11 @@ export default function Operations() {
 
   async function loadData() {
     const [ops, projs, contrs, cats, sts] = await Promise.all([
-      mockService.getOperations(),
-      mockService.getProjects(),
-      mockService.getCounterparties(),
-      mockService.getCategories(),
-      mockService.getStages(),
+      pocketbaseService.getOperations(),
+      pocketbaseService.getProjects(),
+      pocketbaseService.getCounterparties(),
+      pocketbaseService.getCategories(),
+      pocketbaseService.getStages(),
     ]);
     setOperations(ops);
     setProjects(projs.map(p => ({ id: p.id, name: p.name })));
@@ -82,7 +82,7 @@ export default function Operations() {
   };
 
   const handleArchive = async (id: string) => {
-    await mockService.archiveOperation(id);
+    await pocketbaseService.archiveOperation(id);
     await loadData();
   };
 
@@ -278,9 +278,9 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
         is_archived: false, parent_id: views.length > 1 ? `parent_${Date.now()}` : null,
       };
       if (operation) {
-        await mockService.updateOperation(operation.id, data);
+        await pocketbaseService.updateOperation(operation.id, data);
       } else {
-        await mockService.createOperation(data);
+        await pocketbaseService.createOperation(data);
       }
     }
     onSaved();

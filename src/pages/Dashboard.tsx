@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import type { Operation } from '@/types';
-import { mockService } from '@/lib/mockService';
+import { pocketbaseService } from '@/lib/pocketbaseService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -60,7 +60,7 @@ export default function Dashboard() {
   const [showRecords, setShowRecords] = useState(false);
 
   useEffect(() => {
-    mockService.getOperations().then(setOperations);
+    pocketbaseService.getOperations().then(setOperations);
   }, []);
 
   const kpi = useMemo(() => {
