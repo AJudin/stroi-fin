@@ -79,9 +79,10 @@ function mapProject(r: Record<string, unknown>): Project {
 }
 
 function mapOperation(r: Record<string, unknown>): Operation {
+  const rawDate = String(r.date);
   return {
     id: String(r.id),
-    date: String(r.date),
+    date: rawDate ? rawDate.slice(0, 10) : '',
     week: Number(r.week),
     project_id: String(r.project_id),
     project_name: expandName(r, 'project_id'),

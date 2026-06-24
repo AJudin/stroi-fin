@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
-import type { Operation, Project } from '@/types';
+import type { Operation, Project, Counterparty, Category, Stage } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
+import OperationFormDialog from '@/components/OperationFormDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -57,13 +58,36 @@ function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, i
 export default function Dashboard() {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [openBlock, setOpenBlock] = useState<string | null>('management');
   const [showRecords, setShowRecords] = useState(false);
+  const [editingOp, setEditingOp] = useState<Operation | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+
+  async function loadData() {
+    const [ops, prjs, contrs, cats, sts] = await Promise.all([
+      pocketbaseService.getOperations(),
+      pocketbaseService.getProjects(),
+      pocketbaseService.getCounterparties(),
+      pocketbaseService.getCategories(),
+      pocketbaseService.getStages(),
+    ]);
+    setOperations(ops);
+    setProjects(prjs);
+    setCounterparties(contrs);
+    setCategories(cats);
+    setStages(sts);
+  }
 
   useEffect(() => {
-    pocketbaseService.getOperations().then(setOperations);
-    pocketbaseService.getProjects().then(setProjects);
+    loadData();
   }, []);
+
+  const handleCounterpartyCreated = (c: Counterparty) => {
+    setCounterparties(prev => [...prev, c]);
+  };
 
   const kpi = useMemo(() => {
     const mgmt = operations.filter(o => o.view === 'Управленческий учёт' && !o.is_archived);
@@ -239,12 +263,17 @@ export default function Dashboard() {
                       <TableHead>Проект</TableHead>
                       <TableHead>Контрагент</TableHead>
                       <TableHead>Тип</TableHead>
+                      <TableHead>Статус</TableHead>
                       <TableHead className="text-right">Сумма</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {blockRecords.map(op => (
-                      <TableRow key={op.id}>
+                      <TableRow
+                        key={op.id}
+                        className="cursor-pointer hover:bg-slate-50"
+                        onClick={() => { setEditingOp(op); setIsFormOpen(true); }}
+                      >
                         <TableCell>{new Date(op.date).toLocaleDateString('ru-RU')}</TableCell>
                         <TableCell className="font-medium">{op.project_name}</TableCell>
                         <TableCell>{op.counterparty_name}</TableCell>
@@ -254,12 +283,26 @@ export default function Dashboard() {
                             {op.type}
                           </Badge>
                         </TableCell>
+                        <TableCell>
+                          {op.act_status && (
+                            <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                              className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
+                              {op.act_status}
+                            </Badge>
+                          )}
+                          {op.payment_status && (
+                            <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                              className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'}>
+                              {op.payment_status}
+                            </Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right font-mono">{op.amount.toLocaleString('ru-RU')} ₽</TableCell>
                       </TableRow>
                     ))}
                     {blockRecords.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-slate-400 py-8">Нет записей</TableCell>
+                        <TableCell colSpan={6} className="text-center text-slate-400 py-8">Нет записей</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -269,6 +312,19 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
+
+      <OperationFormDialog
+        key={editingOp?.id || 'new'}
+        open={isFormOpen}
+        onClose={() => { setIsFormOpen(false); setEditingOp(null); }}
+        operation={editingOp}
+        projects={projects.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id }))}
+        counterparties={counterparties}
+        categories={categories.map(c => ({ id: c.id, name: c.name, type: c.type }))}
+        stages={stages.map(s => ({ id: s.id, name: s.name }))}
+        onSaved={loadData}
+        onCounterpartyCreated={handleCounterpartyCreated}
+      />
 
       {/* Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

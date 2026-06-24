@@ -11,10 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
-  ArrowLeft, Plus, ChevronDown, ChevronUp,
-  Archive, Download, Upload
+  ArrowLeft, Plus, Archive, Download, Upload
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import OperationFormDialog from '@/components/OperationFormDialog';
@@ -40,7 +38,6 @@ export default function ProjectDetail() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   void stages;
-  const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const [isOpFormOpen, setIsOpFormOpen] = useState(false);
   const [isPlanFormOpen, setIsPlanFormOpen] = useState(false);
   const [importReport, setImportReport] = useState<{ imported: number; errors: { row: number; message: string }[] } | null>(null);
@@ -455,15 +452,7 @@ export default function ProjectDetail() {
         </TabsContent>
 
         {/* Planning */}
-        <TabsContent value="planning" className="mt-4">
-          <Collapsible open={isPlanningOpen} onOpenChange={setIsPlanningOpen}>
-            <CollapsibleTrigger asChild>
-              <Button variant="outline" size="sm" className="mb-4">
-                {isPlanningOpen ? <ChevronUp className="w-4 h-4 mr-1" /> : <ChevronDown className="w-4 h-4 mr-1" />}
-                {isPlanningOpen ? 'Свернуть' : 'Развернуть'} планирование
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-4">
+        <TabsContent value="planning" className="mt-4 space-y-4">
               <div className="flex flex-wrap gap-2">
                 {(isAdmin || isManager) && (
                   <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"
@@ -562,13 +551,12 @@ export default function ProjectDetail() {
                   </Table>
                 </CardContent>
               </Card>
-            </CollapsibleContent>
-          </Collapsible>
         </TabsContent>
       </Tabs>
 
       {/* Operation Form Dialog */}
       <OperationFormDialog
+        key={editingOp?.id || 'new'}
         open={isOpFormOpen}
         onClose={() => { setIsOpFormOpen(false); setEditingOp(null); }}
         operation={editingOp}

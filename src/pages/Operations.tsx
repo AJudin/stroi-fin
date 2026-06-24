@@ -282,6 +282,7 @@ export default function Operations() {
 
       {/* Form Dialog */}
       <OperationFormDialog
+        key={editingOp?.id || 'new'}
         open={isFormOpen}
         onClose={() => { setIsFormOpen(false); setEditingOp(null); }}
         operation={editingOp}
