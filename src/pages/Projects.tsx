@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Project, Operation, Counterparty, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
@@ -10,10 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CounterpartySelect from '@/components/CounterpartySelect';
-import { Plus, Eye, ArrowRight, Trash2 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Plus, Trash2 } from 'lucide-react';
 
 export default function Projects() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -73,12 +74,15 @@ export default function Projects() {
                 <TableHead className="text-right">Актирование</TableHead>
                 <TableHead className="text-right">Касса</TableHead>
                 <TableHead>Сроки</TableHead>
-                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {projects.map(p => (
-                <TableRow key={p.id} className="hover:bg-slate-50">
+                <TableRow
+                  key={p.id}
+                  className="hover:bg-slate-50 cursor-pointer"
+                  onClick={() => navigate(`/projects/${p.id}`)}
+                >
                   <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell>{p.counterparty_name}</TableCell>
                   <TableCell className={`text-right font-mono ${getProjectBalance(p.id, 'Управленческий учёт') >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -93,18 +97,11 @@ export default function Projects() {
                   <TableCell className="text-sm text-slate-500">
                     {new Date(p.start_date).toLocaleDateString('ru-RU')} — {new Date(p.end_date).toLocaleDateString('ru-RU')}
                   </TableCell>
-                  <TableCell>
-                    <Link to={`/projects/${p.id}`}>
-                      <Button variant="ghost" size="sm" className="gap-1">
-                        <Eye className="w-4 h-4" /> <ArrowRight className="w-3 h-3" />
-                      </Button>
-                    </Link>
-                  </TableCell>
                 </TableRow>
               ))}
               {projects.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-slate-400 py-12">Нет проектов</TableCell>
+                  <TableCell colSpan={6} className="text-center text-slate-400 py-12">Нет проектов</TableCell>
                 </TableRow>
               )}
             </TableBody>

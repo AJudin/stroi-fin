@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import type { Project, Operation, Planning, Counterparty, Category, Stage, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
@@ -17,9 +17,21 @@ import {
   Archive, Download, Upload
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import OperationFormDialog from '@/components/OperationFormDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -32,6 +44,8 @@ export default function ProjectDetail() {
   const [isOpFormOpen, setIsOpFormOpen] = useState(false);
   const [isPlanFormOpen, setIsPlanFormOpen] = useState(false);
   const [importReport, setImportReport] = useState<{ imported: number; errors: { row: number; message: string }[] } | null>(null);
+  const [editingOp, setEditingOp] = useState<Operation | null>(null);
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'payment' | 'contract'; target: Operation | Contract | null; projectId?: string; nextStatus?: string }>({ open: false, type: 'act', target: null });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = user?.role === 'admin';
@@ -68,12 +82,17 @@ export default function ProjectDetail() {
     };
   }, [operations]);
 
-  const balances = useMemo(() => ({
-    management: projectOps.management.reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
-    acts: projectOps.acts.reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
-    cash: projectOps.cash.reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
-    planning: planning.reduce((s, p) => s + (p.type === 'Приход' ? p.amount : -p.amount), 0),
-  }), [projectOps, planning]);
+  const balances = useMemo(() => {
+    const signed = (ops: Operation[]) => ops.reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0);
+    return {
+      management: signed(projectOps.management),
+      acts: signed(projectOps.acts),
+      actsUnsigned: projectOps.acts.filter(o => o.act_status === 'Не подписан').reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
+      cash: signed(projectOps.cash),
+      cashUnpaid: projectOps.cash.filter(o => o.payment_status === 'Не оплачен').reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
+      planning: planning.reduce((s, p) => s + (p.type === 'Приход' ? p.amount : -p.amount), 0),
+    };
+  }, [projectOps, planning]);
 
   const handleDownloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
@@ -83,6 +102,29 @@ export default function ProjectDetail() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Планирование');
     XLSX.writeFile(wb, 'planning_template.xlsx');
+  };
+
+  const handleCounterpartyCreated = (c: Counterparty) => {
+    setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleConfirmStatus = async () => {
+    if (!confirmStatus.target) return;
+    if (confirmStatus.type === 'contract' && confirmStatus.projectId) {
+      const contract = confirmStatus.target as Contract;
+      const next: Contract = { ...contract, status: (confirmStatus.nextStatus as Contract['status']) || contract.status };
+      await pocketbaseService.updateProject(confirmStatus.projectId, {
+        contracts: project?.contracts.map(x => x.id === contract.id ? next : x) || [],
+      });
+    } else if (confirmStatus.type === 'act') {
+      const op = confirmStatus.target as Operation;
+      await pocketbaseService.updateOperation(op.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || op.act_status });
+    } else if (confirmStatus.type === 'payment') {
+      const op = confirmStatus.target as Operation;
+      await pocketbaseService.updateOperation(op.id, { payment_status: (confirmStatus.nextStatus as Operation['payment_status']) || op.payment_status });
+    }
+    setConfirmStatus({ open: false, type: 'act', target: null });
+    await loadData();
   };
 
   const handleImportClick = () => {
@@ -225,16 +267,15 @@ export default function ProjectDetail() {
                     key={c.id}
                     variant={c.status === 'Подписан' ? 'default' : 'destructive'}
                     className={`cursor-pointer ${c.status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}`}
-                    onClick={async () => {
+                    onClick={() => {
                       if (!project) return;
-                      const next: Contract = { ...c, status: c.status === 'Подписан' ? 'Не подписан' : 'Подписан' };
-                      await pocketbaseService.updateProject(project.id, {
-                        contracts: project.contracts.map(x => x.id === c.id ? next : x),
+                      setConfirmStatus({
+                        open: true, type: 'contract', target: c, projectId: project.id,
+                        nextStatus: c.status === 'Подписан' ? 'Не подписан' : 'Подписан',
                       });
-                      await loadData();
                     }}
                   >
-                    {c.number || '—'} {c.amount > 0 && `(${c.amount.toLocaleString('ru-RU')} ₽)`}
+                    {c.number || '—'} — {c.status} {c.amount > 0 && `(${c.amount.toLocaleString('ru-RU')} ₽)`}
                   </Badge>
                 ))}
               </div>
@@ -264,7 +305,12 @@ export default function ProjectDetail() {
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm text-slate-500">Управленческий учёт</CardTitle>
+                  <CardTitle
+                    className="text-sm text-slate-500 cursor-pointer hover:text-emerald-600"
+                    onClick={() => navigate(`/operations?project_id=${id}&view=${encodeURIComponent('Управленческий учёт')}`)}
+                  >
+                    Управленческий учёт
+                  </CardTitle>
                   <span className={`text-lg font-bold ${balances.management >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                     {balances.management.toLocaleString('ru-RU')} ₽
                   </span>
@@ -273,7 +319,11 @@ export default function ProjectDetail() {
               <CardContent className="pt-0">
                 <div className="space-y-1 max-h-64 overflow-auto">
                   {projectOps.management.map(op => (
-                    <div key={op.id} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm">
+                    <div
+                      key={op.id}
+                      className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm cursor-pointer hover:bg-slate-100"
+                      onClick={() => { setEditingOp(op); setIsOpFormOpen(true); }}
+                    >
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{op.category_name} | {op.comment}</p>
                         <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')}</p>
@@ -292,16 +342,28 @@ export default function ProjectDetail() {
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm text-slate-500">Актирование</CardTitle>
-                  <span className={`text-lg font-bold ${balances.acts >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {balances.acts.toLocaleString('ru-RU')} ₽
-                  </span>
+                  <CardTitle
+                    className="text-sm text-slate-500 cursor-pointer hover:text-emerald-600"
+                    onClick={() => navigate(`/operations?project_id=${id}&view=${encodeURIComponent('Актирование')}`)}
+                  >
+                    Актирование
+                  </CardTitle>
+                  <div className="text-right">
+                    <span className={`text-lg font-bold ${balances.acts >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {balances.acts.toLocaleString('ru-RU')} ₽
+                    </span>
+                    <p className="text-xs text-slate-500">Не подписано: {balances.actsUnsigned.toLocaleString('ru-RU')} ₽</p>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="space-y-1 max-h-64 overflow-auto">
                   {projectOps.acts.map(op => (
-                    <div key={op.id} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm">
+                    <div
+                      key={op.id}
+                      className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm cursor-pointer hover:bg-slate-100"
+                      onClick={() => { setEditingOp(op); setIsOpFormOpen(true); }}
+                    >
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{op.comment}</p>
                         <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')}</p>
@@ -311,8 +373,17 @@ export default function ProjectDetail() {
                           {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')}
                         </span>
                         {op.act_status && (
-                          <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
-                            className={`text-[10px] ml-1 ${op.act_status === 'Подписан' ? 'bg-emerald-500' : ''}`}>
+                          <Badge
+                            variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                            className={`text-[10px] ml-1 cursor-pointer ${op.act_status === 'Подписан' ? 'bg-emerald-500' : ''}`}
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmStatus({
+                                open: true, type: 'act', target: op,
+                                nextStatus: op.act_status === 'Подписан' ? 'Не подписан' : 'Подписан',
+                              });
+                            }}
+                          >
                             {op.act_status}
                           </Badge>
                         )}
@@ -328,16 +399,28 @@ export default function ProjectDetail() {
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm text-slate-500">Касса</CardTitle>
-                  <span className={`text-lg font-bold ${balances.cash >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {balances.cash.toLocaleString('ru-RU')} ₽
-                  </span>
+                  <CardTitle
+                    className="text-sm text-slate-500 cursor-pointer hover:text-emerald-600"
+                    onClick={() => navigate(`/operations?project_id=${id}&view=${encodeURIComponent('Касса')}`)}
+                  >
+                    Касса
+                  </CardTitle>
+                  <div className="text-right">
+                    <span className={`text-lg font-bold ${balances.cash >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {balances.cash.toLocaleString('ru-RU')} ₽
+                    </span>
+                    <p className="text-xs text-slate-500">Не оплачено: {balances.cashUnpaid.toLocaleString('ru-RU')} ₽</p>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="space-y-1 max-h-64 overflow-auto">
                   {projectOps.cash.map(op => (
-                    <div key={op.id} className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm">
+                    <div
+                      key={op.id}
+                      className="flex items-center justify-between p-2 bg-slate-50 rounded text-sm cursor-pointer hover:bg-slate-100"
+                      onClick={() => { setEditingOp(op); setIsOpFormOpen(true); }}
+                    >
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{op.category_name} | {op.comment}</p>
                         <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')}</p>
@@ -347,8 +430,17 @@ export default function ProjectDetail() {
                           {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')}
                         </span>
                         {op.payment_status && (
-                          <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                            className={`text-[10px] ml-1 ${op.payment_status === 'Оплачен' ? 'bg-emerald-500' : ''}`}>
+                          <Badge
+                            variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                            className={`text-[10px] ml-1 cursor-pointer ${op.payment_status === 'Оплачен' ? 'bg-emerald-500' : ''}`}
+                            onClick={e => {
+                              e.stopPropagation();
+                              setConfirmStatus({
+                                open: true, type: 'payment', target: op,
+                                nextStatus: op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен',
+                              });
+                            }}
+                          >
                             {op.payment_status}
                           </Badge>
                         )}
@@ -476,19 +568,41 @@ export default function ProjectDetail() {
       </Tabs>
 
       {/* Operation Form Dialog */}
-      <Dialog open={isOpFormOpen} onOpenChange={() => { setIsOpFormOpen(false); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Новая операция</DialogTitle></DialogHeader>
-          <QuickOpForm
-            projectId={id || ''}
-            counterparties={counterparties}
-            categories={categories}
-            _stages={stages}
-            onSaved={loadData}
-            onClose={() => { setIsOpFormOpen(false); }}
-          />
-        </DialogContent>
-      </Dialog>
+      <OperationFormDialog
+        open={isOpFormOpen}
+        onClose={() => { setIsOpFormOpen(false); setEditingOp(null); }}
+        operation={editingOp}
+        projects={project ? [{ id: project.id, name: project.name, counterparty_id: project.counterparty_id }] : []}
+        counterparties={counterparties}
+        categories={categories}
+        stages={stages}
+        onSaved={loadData}
+        onCounterpartyCreated={handleCounterpartyCreated}
+      />
+
+      {/* Status Change Confirmation */}
+      <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, type: 'act', target: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Подтвердите изменение статуса</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmStatus.type === 'contract' && confirmStatus.target && (
+                <>Изменить статус договора «{(confirmStatus.target as Contract).number || '—'}» на «{confirmStatus.nextStatus}»?</>
+              )}
+              {confirmStatus.type === 'act' && confirmStatus.target && (
+                <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>
+              )}
+              {confirmStatus.type === 'payment' && confirmStatus.target && (
+                <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmStatus({ open: false, type: 'act', target: null })}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmStatus} className="bg-emerald-600 hover:bg-emerald-700">Подтвердить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Planning Form Dialog */}
       <Dialog open={isPlanFormOpen} onOpenChange={() => setIsPlanFormOpen(false)}>
@@ -504,75 +618,6 @@ export default function ProjectDetail() {
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function QuickOpForm({ projectId, counterparties, categories, _stages, onSaved, onClose }:
-  { projectId: string; counterparties: Counterparty[]; categories: Category[]; _stages: Stage[];
-    onSaved: () => void; onClose: () => void;
-  }) {
-    void _stages;
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
-  const [view, setView] = useState<'Управленческий учёт' | 'Актирование' | 'Касса'>('Управленческий учёт');
-  const [type, setType] = useState<'Приход' | 'Расход'>('Приход');
-  const [counterpartyId, setCounterpartyId] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [stageId, setStageId] = useState('');
-  void setStageId;
-  const [amount, setAmount] = useState('');
-  const [comment, setComment] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await pocketbaseService.createOperation({
-      date, project_id: projectId, view, type,
-      counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
-      comment, amount: parseFloat(amount),
-      act_status: view === 'Актирование' ? 'Не подписан' : null,
-      payment_status: view === 'Касса' ? 'Не оплачен' : null,
-      is_archived: false, parent_id: null,
-    });
-    onSaved();
-    onClose();
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3 pt-2">
-      <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
-      <Select value={view} onValueChange={(v) => setView(v as typeof view)}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="Управленческий учёт">Управленческий учёт</SelectItem>
-          <SelectItem value="Актирование">Актирование</SelectItem>
-          <SelectItem value="Касса">Касса</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="Приход">Приход</SelectItem>
-          <SelectItem value="Расход">Расход</SelectItem>
-        </SelectContent>
-      </Select>
-      <Select value={counterpartyId} onValueChange={setCounterpartyId}>
-        <SelectTrigger><SelectValue placeholder="Контрагент" /></SelectTrigger>
-        <SelectContent>
-          {counterparties.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Select value={categoryId} onValueChange={setCategoryId}>
-        <SelectTrigger><SelectValue placeholder="Статья" /></SelectTrigger>
-        <SelectContent>
-          {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-        </SelectContent>
-      </Select>
-      <Input type="number" placeholder="Сумма" value={amount} onChange={e => setAmount(e.target.value)} required />
-      <Input placeholder="Комментарий" value={comment} onChange={e => setComment(e.target.value)} />
-      <div className="flex gap-2">
-        <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700">Создать</Button>
-        <Button type="button" variant="outline" onClick={onClose}>Отмена</Button>
-      </div>
-    </form>
   );
 }
 
