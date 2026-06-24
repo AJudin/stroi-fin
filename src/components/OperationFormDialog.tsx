@@ -128,12 +128,12 @@ export default function OperationFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-auto">
+      <DialogContent className="w-full max-w-[95vw] md:max-w-4xl max-h-[90vh] overflow-auto p-4 md:p-6">
         <DialogHeader>
           <DialogTitle>{operation ? 'Редактирование операции' : 'Новая операция'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Дата</Label>
               <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
@@ -169,7 +169,7 @@ export default function OperationFormDialog({
             {operation && <p className="text-xs text-slate-400">Вид нельзя изменить при редактировании</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Тип</Label>
               <Select value={type} onValueChange={(v) => setType(v as 'Приход' | 'Расход')}>
@@ -192,7 +192,7 @@ export default function OperationFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Статья</Label>
               <Select value={categoryId} onValueChange={setCategoryId}>
