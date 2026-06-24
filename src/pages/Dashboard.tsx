@@ -1,7 +1,18 @@
 import { useState, useMemo, useEffect } from 'react';
-import type { Operation, Project, Counterparty, Category, Stage } from '@/types';
+import { useNavigate } from 'react-router-dom';
+import type { Operation, Project, Counterparty, Category, Stage, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import OperationFormDialog from '@/components/OperationFormDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +23,7 @@ import {
 } from 'lucide-react';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Line, ComposedChart, ReferenceLine
+  Line, ComposedChart, ReferenceLine, Label
 } from 'recharts';
 
 interface KPICardProps {
@@ -56,6 +67,7 @@ function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, i
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [operations, setOperations] = useState<Operation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
@@ -65,6 +77,7 @@ export default function Dashboard() {
   const [showRecords, setShowRecords] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
 
   async function loadData() {
     const [ops, prjs, contrs, cats, sts] = await Promise.all([
@@ -89,6 +102,22 @@ export default function Dashboard() {
     setCounterparties(prev => [...prev, c]);
   };
 
+  const handleConfirmStatus = async () => {
+    if (!confirmStatus.target) return;
+    if (confirmStatus.type === 'act') {
+      const act = confirmStatus.target as Operation;
+      await pocketbaseService.updateOperation(act.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || act.act_status });
+    } else if (confirmStatus.type === 'contract' && confirmStatus.project) {
+      const contract = confirmStatus.target as Contract;
+      const next: Contract = { ...contract, status: (confirmStatus.nextStatus as Contract['status']) || contract.status };
+      await pocketbaseService.updateProject(confirmStatus.project.id, {
+        contracts: confirmStatus.project.contracts.map(x => x.id === contract.id ? next : x),
+      });
+    }
+    setConfirmStatus({ open: false, type: 'act', target: null });
+    await loadData();
+  };
+
   const kpi = useMemo(() => {
     const mgmt = operations.filter(o => o.view === 'Управленческий учёт' && !o.is_archived);
     const acts = operations.filter(o => o.view === 'Актирование' && !o.is_archived);
@@ -111,7 +140,7 @@ export default function Dashboard() {
     };
   }, [operations]);
 
-  const chartData = useMemo(() => {
+  const cumulativeData = useMemo(() => {
     const today = new Date('2026-06-24');
     const dates: { date: Date; label: string }[] = [];
     for (let i = -45; i <= 45; i++) {
@@ -123,29 +152,26 @@ export default function Dashboard() {
       });
     }
 
+    const viewFilter = openBlock === 'management' ? 'Управленческий учёт' :
+      openBlock === 'acts' ? 'Актирование' : 'Касса';
+
+    const startDateStr = dates[0].date.toISOString().split('T')[0];
+    let cumulative = operations
+      .filter(o => o.view === viewFilter && !o.is_archived && o.date < startDateStr)
+      .reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0);
+
     return dates.map(({ date, label }) => {
       const dateStr = date.toISOString().split('T')[0];
-      const viewFilter = openBlock === 'management' ? 'Управленческий учёт' :
-        openBlock === 'acts' ? 'Актирование' : 'Касса';
-
       const dayOps = operations.filter(o =>
         o.view === viewFilter && !o.is_archived && o.date === dateStr
       );
-
       const income = dayOps.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
       const expense = dayOps.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
-
-      return { label, value: income - expense, isFuture: date > today };
+      const value = income - expense;
+      cumulative += value;
+      return { label, value, cumulative: Math.round(cumulative), isFuture: date > today };
     });
   }, [operations, openBlock]);
-
-  const cumulativeData = useMemo(() => {
-    let cumulative = 0;
-    return chartData.map(d => {
-      cumulative += d.value;
-      return { ...d, cumulative: Math.round(cumulative) };
-    });
-  }, [chartData]);
 
   const unsignedActs = useMemo(() =>
     operations.filter(o => o.view === 'Актирование' && o.act_status === 'Не подписан' && !o.is_archived)
@@ -240,7 +266,9 @@ export default function Dashboard() {
                     formatter={(v: number) => [`${v.toLocaleString('ru-RU')} ₽`, 'Баланс']}
                     labelFormatter={(l) => `Дата: ${l}`}
                   />
-                  <ReferenceLine x={cumulativeData.find(d => !d.isFuture)?.label || ''} stroke="#94a3b8" strokeDasharray="4 4" />
+                  <ReferenceLine x={cumulativeData.find(d => !d.isFuture)?.label || ''} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={2}>
+                    <Label value="Сегодня" position="insideTopLeft" fill="#f59e0b" fontSize={10} />
+                  </ReferenceLine>
                   <Line
                     type="monotone"
                     dataKey="cumulative"
@@ -263,7 +291,7 @@ export default function Dashboard() {
                       <TableHead>Проект</TableHead>
                       <TableHead>Контрагент</TableHead>
                       <TableHead>Тип</TableHead>
-                      <TableHead>Статус</TableHead>
+                      {openBlock !== 'management' && <TableHead>Статус</TableHead>}
                       <TableHead className="text-right">Сумма</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -283,26 +311,28 @@ export default function Dashboard() {
                             {op.type}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          {op.act_status && (
-                            <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
-                              className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
-                              {op.act_status}
-                            </Badge>
-                          )}
-                          {op.payment_status && (
-                            <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                              className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'}>
-                              {op.payment_status}
-                            </Badge>
-                          )}
-                        </TableCell>
+                        {openBlock !== 'management' && (
+                          <TableCell>
+                            {op.act_status && (
+                              <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                                className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
+                                {op.act_status}
+                              </Badge>
+                            )}
+                            {op.payment_status && (
+                              <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                                className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'}>
+                                {op.payment_status}
+                              </Badge>
+                            )}
+                          </TableCell>
+                        )}
                         <TableCell className="text-right font-mono">{op.amount.toLocaleString('ru-RU')} ₽</TableCell>
                       </TableRow>
                     ))}
                     {blockRecords.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-slate-400 py-8">Нет записей</TableCell>
+                        <TableCell colSpan={openBlock === 'management' ? 5 : 6} className="text-center text-slate-400 py-8">Нет записей</TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -344,13 +374,18 @@ export default function Dashboard() {
               {unsignedActs.map(act => {
                 const daysOverdue = Math.floor((new Date('2026-06-24').getTime() - new Date(act.date).getTime()) / 86400000);
                 return (
-                  <div key={act.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                  <div
+                    key={act.id}
+                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100"
+                    onClick={() => navigate(`/projects/${act.project_id}`)}
+                  >
                     <div>
                       <p className="text-sm font-medium">{act.project_name}</p>
                       <p className="text-xs text-slate-500">{act.counterparty_name} | {act.amount.toLocaleString('ru-RU')} ₽</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-500">{new Date(act.date).toLocaleDateString('ru-RU')}</p>
+                    <div className="text-right" onClick={e => { e.stopPropagation(); setConfirmStatus({ open: true, type: 'act', target: act, nextStatus: 'Подписан' }); }}>
+                      <Badge variant="destructive" className="text-xs cursor-pointer">Не подписан</Badge>
+                      <p className="text-xs text-slate-500 mt-1">{new Date(act.date).toLocaleDateString('ru-RU')}</p>
                       {daysOverdue > 0 && (
                         <p className="text-xs text-red-500 font-medium">{daysOverdue} дн. просрочки</p>
                       )}
@@ -379,12 +414,22 @@ export default function Dashboard() {
           <CardContent className="pt-0">
             <div className="space-y-2 max-h-64 overflow-auto">
               {unsignedContracts.map(({ project, contract }) => (
-                <div key={`${project.id}-${contract.id}`} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div
+                  key={`${project.id}-${contract.id}`}
+                  className="flex items-center justify-between p-3 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100"
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                >
                   <div>
                     <p className="text-sm font-medium">{project.name}</p>
                     <p className="text-xs text-slate-500">{contract.number || '—'} | {contract.amount.toLocaleString('ru-RU')} ₽ | {new Date(project.start_date).toLocaleDateString('ru-RU')}</p>
                   </div>
-                  <Badge variant="destructive" className="text-xs">Не подписан</Badge>
+                  <Badge
+                    variant="destructive"
+                    className="text-xs cursor-pointer"
+                    onClick={e => { e.stopPropagation(); setConfirmStatus({ open: true, type: 'contract', target: contract, project, nextStatus: 'Подписан' }); }}
+                  >
+                    Не подписан
+                  </Badge>
                 </div>
               ))}
               {unsignedContracts.length === 0 && (
@@ -394,6 +439,26 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, type: 'act', target: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Подтвердите изменение статуса</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmStatus.type === 'act' && confirmStatus.target && (
+                <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>
+              )}
+              {confirmStatus.type === 'contract' && confirmStatus.target && (
+                <>Изменить статус договора «{(confirmStatus.target as Contract).number || '—'}» на «{confirmStatus.nextStatus}»?</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmStatus({ open: false, type: 'act', target: null })}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmStatus} className="bg-emerald-600 hover:bg-emerald-700">Подтвердить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
