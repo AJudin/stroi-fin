@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Project, Operation } from '@/types';
+import type { Project, Operation, Counterparty, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -9,14 +9,15 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Eye, ArrowRight } from 'lucide-react';
+import CounterpartySelect from '@/components/CounterpartySelect';
+import { Plus, Eye, ArrowRight, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Projects() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [operations, setOperations] = useState<Operation[]>([]);
-  const [counterparties, setCounterparties] = useState<{ id: string; name: string }[]>([]);
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
 
@@ -35,7 +36,7 @@ export default function Projects() {
     ]);
     setProjects(prjs);
     setOperations(ops);
-    setCounterparties(contrs.map(c => ({ id: c.id, name: c.name })));
+    setCounterparties(contrs);
   }
 
   const getProjectBalance = (projectId: string, view: string) => {
@@ -43,6 +44,10 @@ export default function Projects() {
     const income = ops.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
     const expense = ops.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
     return income - expense;
+  };
+
+  const handleCounterpartyCreated = (c: Counterparty) => {
+    setCounterparties(prev => [...prev, c]);
   };
 
   return (
@@ -113,23 +118,25 @@ export default function Projects() {
         project={editingProject}
         counterparties={counterparties}
         onSaved={loadData}
+        onCounterpartyCreated={handleCounterpartyCreated}
       />
     </div>
   );
 }
 
-function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
+function ProjectFormDialog({ open, onClose, project, counterparties, onSaved, onCounterpartyCreated }:
   {
     open: boolean; onClose: () => void; project: Project | null;
-    counterparties: { id: string; name: string }[];
+    counterparties: Counterparty[];
     onSaved: () => void;
+    onCounterpartyCreated: (c: Counterparty) => void;
   }) {
   const [name, setName] = useState(project?.name || '');
   const [counterpartyId, setCounterpartyId] = useState(project?.counterparty_id || '');
   const [startDate, setStartDate] = useState(project?.start_date || '');
   const [endDate, setEndDate] = useState(project?.end_date || '');
   const [totalCost, setTotalCost] = useState(project?.total_cost?.toString() || '');
-  const [contractNumber, setContractNumber] = useState(project?.contracts?.[0]?.number || '');
+  const [contracts, setContracts] = useState<Contract[]>(project?.contracts || []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,7 +144,7 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
       name, counterparty_id: counterpartyId,
       start_date: startDate, end_date: endDate,
       total_cost: parseFloat(totalCost) || 0,
-      contracts: contractNumber ? [{ id: `ct_${Date.now()}`, number: contractNumber, status: 'Не подписан' as const, amount: parseFloat(totalCost) || 0 }] : [],
+      contracts,
     };
     if (project) {
       await pocketbaseService.updateProject(project.id, data);
@@ -148,9 +155,21 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
     onClose();
   };
 
+  const addContract = () => {
+    setContracts(prev => [...prev, { id: `ct_${Date.now()}`, number: '', status: 'Не подписан', amount: 0 }]);
+  };
+
+  const updateContract = (index: number, patch: Partial<Contract>) => {
+    setContracts(prev => prev.map((c, i) => i === index ? { ...c, ...patch } : c));
+  };
+
+  const removeContract = (index: number) => {
+    setContracts(prev => prev.filter((_, i) => i !== index));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>{project ? 'Редактирование проекта' : 'Новый проект'}</DialogTitle>
         </DialogHeader>
@@ -161,14 +180,13 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
           </div>
           <div className="space-y-1.5">
             <Label>Заказчик</Label>
-            <Select value={counterpartyId} onValueChange={setCounterpartyId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {counterparties.map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <CounterpartySelect
+              value={counterpartyId}
+              onChange={setCounterpartyId}
+              counterparties={counterparties}
+              onCreated={onCounterpartyCreated}
+              filterType="Заказчик"
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -181,13 +199,51 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved }:
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>№ договора</Label>
-            <Input value={contractNumber} onChange={e => setContractNumber(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
             <Label>Стоимость (₽)</Label>
             <Input type="number" value={totalCost} onChange={e => setTotalCost(e.target.value)} required />
           </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Договоры</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addContract}>
+                <Plus className="w-4 h-4 mr-1" /> Добавить договор
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {contracts.map((c, idx) => (
+                <div key={c.id} className="grid grid-cols-12 gap-2 items-end border rounded-lg p-3">
+                  <div className="col-span-5 space-y-1.5">
+                    <Label className="text-xs">№ договора</Label>
+                    <Input value={c.number} onChange={e => updateContract(idx, { number: e.target.value })} placeholder="№ договора" />
+                  </div>
+                  <div className="col-span-3 space-y-1.5">
+                    <Label className="text-xs">Сумма</Label>
+                    <Input type="number" value={c.amount || ''} onChange={e => updateContract(idx, { amount: parseFloat(e.target.value) || 0 })} placeholder="Сумма" />
+                  </div>
+                  <div className="col-span-3 space-y-1.5">
+                    <Label className="text-xs">Статус</Label>
+                    <Select value={c.status} onValueChange={(v) => updateContract(idx, { status: v as Contract['status'] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Подписан">Подписан</SelectItem>
+                        <SelectItem value="Не подписан">Не подписан</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-1">
+                    <Button type="button" variant="ghost" size="icon" className="text-red-500" onClick={() => removeContract(idx)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {contracts.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4 border rounded-lg">Нет договоров</p>
+              )}
+            </div>
+          </div>
+
           <div className="flex gap-2 pt-2">
             <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700">Сохранить</Button>
             <Button type="button" variant="outline" onClick={onClose}>Отмена</Button>

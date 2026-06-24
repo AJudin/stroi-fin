@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import type { Project, Operation, Planning, Counterparty, Category, Stage } from '@/types';
+import type { Project, Operation, Planning, Counterparty, Category, Stage, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   ArrowLeft, Plus, ChevronDown, ChevronUp,
-  Archive, Download
+  Archive, Download, Upload
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -31,6 +31,8 @@ export default function ProjectDetail() {
   const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const [isOpFormOpen, setIsOpFormOpen] = useState(false);
   const [isPlanFormOpen, setIsPlanFormOpen] = useState(false);
+  const [importReport, setImportReport] = useState<{ imported: number; errors: { row: number; message: string }[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = user?.role === 'admin';
   const isOperator = user?.role === 'operator';
@@ -83,6 +85,110 @@ export default function ProjectDetail() {
     XLSX.writeFile(wb, 'planning_template.xlsx');
   };
 
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = () => {
+    setImportReport(null);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+
+    const data = await file.arrayBuffer();
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1, defval: '' }) as unknown as (string | number)[][];
+
+    if (rows.length < 2) {
+      setImportReport({ imported: 0, errors: [{ row: 1, message: 'Файл пуст или не содержит данных' }] });
+      return;
+    }
+
+    const header = rows[0].map(h => String(h).trim().toLowerCase());
+    const colIdx: Record<string, number> = {};
+    ['дата', 'тип', 'статья', 'этап', 'сумма', 'комментарий'].forEach(name => {
+      const idx = header.findIndex(h => h === name);
+      if (idx >= 0) colIdx[name] = idx;
+    });
+
+    const errors: { row: number; message: string }[] = [];
+    let imported = 0;
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 1;
+
+      const dateRaw = colIdx['дата'] !== undefined ? row[colIdx['дата']] : '';
+      const typeRaw = colIdx['тип'] !== undefined ? row[colIdx['тип']] : '';
+      const categoryRaw = colIdx['статья'] !== undefined ? row[colIdx['статья']] : '';
+      const stageRaw = colIdx['этап'] !== undefined ? row[colIdx['этап']] : '';
+      const amountRaw = colIdx['сумма'] !== undefined ? row[colIdx['сумма']] : '';
+      const commentRaw = colIdx['комментарий'] !== undefined ? row[colIdx['комментарий']] : '';
+
+      if (!dateRaw && !typeRaw && !categoryRaw && !amountRaw) continue;
+
+      const typeStr = String(typeRaw).trim();
+      const categoryStr = String(categoryRaw).trim();
+      const stageStr = String(stageRaw).trim();
+      const commentStr = String(commentRaw).trim();
+      const amountNum = parseFloat(String(amountRaw).replace(/\s/g, '').replace(',', '.'));
+
+      if (!dateRaw) {
+        errors.push({ row: rowNum, message: 'Не указана дата' });
+        continue;
+      }
+      if (!typeStr || (typeStr.toLowerCase() !== 'приход' && typeStr.toLowerCase() !== 'расход')) {
+        errors.push({ row: rowNum, message: `Некорректный тип: "${typeStr}"` });
+        continue;
+      }
+      if (!categoryStr) {
+        errors.push({ row: rowNum, message: 'Не указана статья' });
+        continue;
+      }
+      if (isNaN(amountNum) || amountNum <= 0) {
+        errors.push({ row: rowNum, message: `Некорректная сумма: "${amountRaw}"` });
+        continue;
+      }
+
+      const dateValue = String(dateRaw).trim();
+      let dateIso = dateValue;
+      if (/^\d{2}\.\d{2}\.\d{4}$/.test(dateValue)) {
+        const [dd, mm, yyyy] = dateValue.split('.');
+        dateIso = `${yyyy}-${mm}-${dd}`;
+      }
+      if (isNaN(new Date(dateIso).getTime())) {
+        errors.push({ row: rowNum, message: `Некорректная дата: "${dateValue}"` });
+        continue;
+      }
+
+      const type: Planning['type'] = typeStr.toLowerCase() === 'приход' ? 'Приход' : 'Расход';
+      const categoryObj = categories.find(c => c.name.toLowerCase() === categoryStr.toLowerCase());
+      const stageObj = stages.find(s => s.name.toLowerCase() === stageStr.toLowerCase());
+
+      try {
+        await pocketbaseService.createPlanning({
+          project_id: id,
+          date: dateIso,
+          type,
+          category: categoryObj ? categoryObj.name : categoryStr,
+          stage_id: stageObj ? stageObj.id : '',
+          amount: amountNum,
+          comment: commentStr,
+        });
+        imported++;
+      } catch (err) {
+        errors.push({ row: rowNum, message: err instanceof Error ? err.message : 'Ошибка сохранения' });
+      }
+    }
+
+    setImportReport({ imported, errors });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    await loadData();
+  };
+
   if (!project) return <div className="p-8 text-center text-slate-400">Загрузка...</div>;
 
   return (
@@ -115,9 +221,20 @@ export default function ProjectDetail() {
               <p className="text-xs text-slate-500">Договоры</p>
               <div className="flex flex-wrap gap-1">
                 {project.contracts?.map(c => (
-                  <Badge key={c.id} variant={c.status === 'Подписан' ? 'default' : 'destructive'}
-                    className={c.status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
-                    {c.number}
+                  <Badge
+                    key={c.id}
+                    variant={c.status === 'Подписан' ? 'default' : 'destructive'}
+                    className={`cursor-pointer ${c.status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}`}
+                    onClick={async () => {
+                      if (!project) return;
+                      const next: Contract = { ...c, status: c.status === 'Подписан' ? 'Не подписан' : 'Подписан' };
+                      await pocketbaseService.updateProject(project.id, {
+                        contracts: project.contracts.map(x => x.id === c.id ? next : x),
+                      });
+                      await loadData();
+                    }}
+                  >
+                    {c.number || '—'} {c.amount > 0 && `(${c.amount.toLocaleString('ru-RU')} ₽)`}
                   </Badge>
                 ))}
               </div>
@@ -255,7 +372,7 @@ export default function ProjectDetail() {
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent className="space-y-4">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {(isAdmin || isManager) && (
                   <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"
                     onClick={() => { setIsPlanFormOpen(true); }}>
@@ -265,7 +382,39 @@ export default function ProjectDetail() {
                 <Button size="sm" variant="outline" onClick={handleDownloadTemplate}>
                   <Download className="w-4 h-4 mr-1" /> Шаблон Excel
                 </Button>
+                {(isAdmin || isManager) && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={handleImport}
+                      onClick={handleFileChange}
+                    />
+                    <Button size="sm" variant="outline" onClick={handleImportClick}>
+                      <Upload className="w-4 h-4 mr-1" /> Импорт Excel
+                    </Button>
+                  </>
+                )}
               </div>
+
+              {importReport && (
+                <div className={`p-3 rounded-lg text-sm ${importReport.errors.length > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>
+                  <p className="font-medium">Импорт завершён</p>
+                  <p>Импортировано: {importReport.imported} строк</p>
+                  {importReport.errors.length > 0 && (
+                    <div className="mt-2">
+                      <p className="font-medium">Ошибки ({importReport.errors.length}):</p>
+                      <ul className="list-disc list-inside max-h-40 overflow-auto text-xs mt-1">
+                        {importReport.errors.map((err, idx) => (
+                          <li key={idx}>Строка {err.row}: {err.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <Card>
                 <CardHeader className="pb-2">

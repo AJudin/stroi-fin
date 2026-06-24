@@ -234,11 +234,12 @@ export const pocketbaseService = {
   },
 
   // Operations
-  getOperations: async (filters?: { project_id?: string; view?: string; type?: string }): Promise<Operation[]> => {
+  getOperations: async (filters?: { project_id?: string; view?: string; type?: string; parent_id?: string | null }): Promise<Operation[]> => {
     const parts = ['is_archived = false'];
     if (filters?.project_id) parts.push(`project_id = "${filters.project_id}"`);
     if (filters?.view) parts.push(`view = "${filters.view}"`);
     if (filters?.type) parts.push(`type = "${filters.type}"`);
+    if (filters?.parent_id) parts.push(`parent_id = "${filters.parent_id}"`);
     const res = await pb.collection('operations').getFullList({
       filter: parts.join(' && '),
       expand: 'project_id,counterparty_id,category_id,stage_id',

@@ -1,25 +1,30 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { Operation } from '@/types';
+import type { Operation, Counterparty } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Search, Download, Pencil, Archive, Link2 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import CounterpartySelect from '@/components/CounterpartySelect';
+import { Plus, Search, Download, Pencil, Archive, Link2, ArrowUpDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'amount';
 
 export default function Operations() {
   const authUser = useAuth().user;
   const isAdmin = authUser?.role === 'admin';
   const isOperator = authUser?.role === 'operator';
   const [operations, setOperations] = useState<Operation[]>([]);
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
-  const [counterparties, setCounterparties] = useState<{ id: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string; counterparty_id: string }[]>([]);
+  const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -28,7 +33,7 @@ export default function Operations() {
   const [viewFilter, setViewFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
-
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'desc' });
 
   useEffect(() => {
     loadData();
@@ -43,22 +48,54 @@ export default function Operations() {
       pocketbaseService.getStages(),
     ]);
     setOperations(ops);
-    setProjects(projs.map(p => ({ id: p.id, name: p.name })));
-    setCounterparties(contrs.map(c => ({ id: c.id, name: c.name })));
+    setProjects(projs.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id })));
+    setCounterparties(contrs);
     setCategories(cats.map(c => ({ id: c.id, name: c.name, type: c.type })));
     setStages(sts.map(s => ({ id: s.id, name: s.name })));
   }
 
+  const handleSort = (key: SortKey) => {
+    setSortConfig(prev => {
+      if (prev.key !== key) return { key, direction: 'asc' };
+      if (prev.direction === 'asc') return { key, direction: 'desc' };
+      return { key: null, direction: 'desc' };
+    });
+  };
+
+  const sortIcon = (key: SortKey) => {
+    if (sortConfig.key !== key) return <ArrowUpDown className="w-3 h-3 ml-1 text-slate-300" />;
+    return <ArrowUpDown className={`w-3 h-3 ml-1 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
+  };
+
   const filteredOps = useMemo(() => {
-    return operations.filter(op => {
+    const list = operations.filter(op => {
       if (searchQuery && !op.counterparty_name?.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !op.project_name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       if (viewFilter !== 'all' && op.view !== viewFilter) return false;
       if (typeFilter !== 'all' && op.type !== typeFilter) return false;
       if (projectFilter !== 'all' && op.project_id !== projectFilter) return false;
       return true;
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [operations, searchQuery, viewFilter, typeFilter, projectFilter]);
+    });
+
+    list.sort((a, b) => {
+      if (!sortConfig.key) return new Date(b.date).getTime() - new Date(a.date).getTime();
+      const key = sortConfig.key;
+      let aVal: string | number = '';
+      let bVal: string | number = '';
+      if (key === 'amount') {
+        aVal = a.amount;
+        bVal = b.amount;
+      } else {
+        aVal = (a[key] as string | undefined) ?? '';
+        bVal = (b[key] as string | undefined) ?? '';
+      }
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    return list;
+  }, [operations, searchQuery, viewFilter, typeFilter, projectFilter, sortConfig]);
 
   const handleExport = () => {
     const data = filteredOps.map(op => ({
@@ -86,11 +123,24 @@ export default function Operations() {
     await loadData();
   };
 
+  const handleCounterpartyCreated = (c: Counterparty) => {
+    setCounterparties(prev => [...prev, c]);
+  };
+
   const viewColors: Record<string, string> = {
     'Управленческий учёт': 'bg-blue-100 text-blue-700',
     'Актирование': 'bg-purple-100 text-purple-700',
     'Касса': 'bg-emerald-100 text-emerald-700',
   };
+
+  const SortableHeader = ({ keyName, children, className }: { keyName: SortKey; children: React.ReactNode; className?: string }) => (
+    <TableHead className={`cursor-pointer select-none ${className || ''}`} onClick={() => handleSort(keyName)}>
+      <div className="flex items-center">
+        {children}
+        {sortIcon(keyName)}
+      </div>
+    </TableHead>
+  );
 
   return (
     <div className="space-y-4">
@@ -149,13 +199,13 @@ export default function Operations() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Дата</TableHead>
-                  <TableHead>Проект</TableHead>
-                  <TableHead>Вид</TableHead>
-                  <TableHead>Тип</TableHead>
-                  <TableHead>Контрагент</TableHead>
-                  <TableHead>Статья</TableHead>
-                  <TableHead className="text-right">Сумма</TableHead>
+                  <SortableHeader keyName="date">Дата</SortableHeader>
+                  <SortableHeader keyName="project_name">Проект</SortableHeader>
+                  <SortableHeader keyName="view">Вид</SortableHeader>
+                  <SortableHeader keyName="type">Тип</SortableHeader>
+                  <SortableHeader keyName="counterparty_name">Контрагент</SortableHeader>
+                  <SortableHeader keyName="category_name">Статья</SortableHeader>
+                  <SortableHeader keyName="amount" className="text-right">Сумма</SortableHeader>
                   <TableHead>Статус</TableHead>
                   <TableHead className="w-20"></TableHead>
                 </TableRow>
@@ -169,7 +219,14 @@ export default function Operations() {
                       <Badge variant="outline" className={`text-xs ${viewColors[op.view] || ''}`}>
                         {op.view}
                       </Badge>
-                      {op.parent_id && <Link2 className="w-3 h-3 inline ml-1 text-slate-400" />}
+                      {op.parent_id && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Link2 className="w-3 h-3 inline ml-1 text-slate-400 cursor-help" />
+                          </TooltipTrigger>
+                          <TooltipContent>Связанная запись</TooltipContent>
+                        </Tooltip>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge className={op.type === 'Приход' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : 'bg-red-100 text-red-700 hover:bg-red-100'}>
@@ -234,19 +291,21 @@ export default function Operations() {
         categories={categories}
         stages={stages}
         onSaved={loadData}
+        onCounterpartyCreated={handleCounterpartyCreated}
       />
     </div>
   );
 }
 
-function OperationFormDialog({ open, onClose, operation, projects, counterparties, categories, stages, onSaved }:
+function OperationFormDialog({ open, onClose, operation, projects, counterparties, categories, stages, onSaved, onCounterpartyCreated }:
   {
     open: boolean; onClose: () => void; operation: Operation | null;
-    projects: { id: string; name: string }[];
-    counterparties: { id: string; name: string }[];
+    projects: { id: string; name: string; counterparty_id: string }[];
+    counterparties: Counterparty[];
     categories: { id: string; name: string; type: string }[];
     stages: { id: string; name: string }[];
     onSaved: () => void;
+    onCounterpartyCreated: (c: Counterparty) => void;
   }) {
   const [projectId, setProjectId] = useState(operation?.project_id || '');
   const [date, setDate] = useState(operation?.date || new Date().toISOString().split('T')[0]);
@@ -259,27 +318,73 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
   const [comment, setComment] = useState(operation?.comment || '');
   const [actStatus, setActStatus] = useState<'Подписан' | 'Не подписан'>(operation?.act_status as 'Подписан' | 'Не подписан' || 'Не подписан');
   const [paymentStatus, setPaymentStatus] = useState<'Оплачен' | 'Не оплачен'>(operation?.payment_status as 'Оплачен' | 'Не оплачен' || 'Не оплачен');
+  const [updateLinked, setUpdateLinked] = useState(false);
 
-  const availableCategories = categories;
-  const availableStages = stages;
+  const project = useMemo(() => projects.find(p => p.id === projectId), [projects, projectId]);
+
+  // Auto-select customer counterparty for income operations
+  useEffect(() => {
+    if (type === 'Приход' && project) {
+      setCounterpartyId(project.counterparty_id);
+    }
+  }, [type, project]);
+
+  // Filter categories by operation type
+  const availableCategories = useMemo(() =>
+    categories.filter(c => c.type === type),
+    [categories, type]
+  );
+
+  useEffect(() => {
+    if (categoryId && !availableCategories.find(c => c.id === categoryId)) {
+      setCategoryId('');
+    }
+  }, [availableCategories, categoryId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!numAmount || !projectId || !counterpartyId) return;
 
-    for (const view of views) {
+    const baseData = {
+      date, project_id: projectId, type,
+      counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
+      comment, amount: numAmount,
+      is_archived: false,
+    };
+
+    if (operation) {
       const data = {
-        date, project_id: projectId, view: view as Operation['view'], type,
-        counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
-        comment, amount: numAmount,
-        act_status: view === 'Актирование' ? actStatus : null,
-        payment_status: view === 'Касса' ? paymentStatus : null,
-        is_archived: false, parent_id: views.length > 1 ? `parent_${Date.now()}` : null,
+        ...baseData,
+        view: operation.view,
+        act_status: operation.view === 'Актирование' ? actStatus : null,
+        payment_status: operation.view === 'Касса' ? paymentStatus : null,
       };
-      if (operation) {
-        await pocketbaseService.updateOperation(operation.id, data);
-      } else {
+      await pocketbaseService.updateOperation(operation.id, data);
+
+      if (updateLinked && operation.parent_id) {
+        const linked = await pocketbaseService.getOperations({ parent_id: operation.parent_id });
+        const updatePayload = {
+          date, project_id: projectId, type,
+          counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
+          comment, amount: numAmount,
+        };
+        await Promise.all(
+          linked.filter(op => op.id !== operation.id).map(op =>
+            pocketbaseService.updateOperation(op.id, updatePayload)
+          )
+        );
+      }
+    } else {
+      const groupId = views.length > 1 ? `group_${Date.now()}` : null;
+      for (const view of views) {
+        const data = {
+          ...baseData,
+          view: view as Operation['view'],
+          act_status: view === 'Актирование' ? actStatus : null,
+          payment_status: view === 'Касса' ? paymentStatus : null,
+          parent_id: groupId,
+        };
         await pocketbaseService.createOperation(data);
       }
     }
@@ -321,11 +426,13 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
                   size="sm"
                   className={views.includes(v) ? 'bg-emerald-600' : ''}
                   onClick={() => setViews(views.includes(v) ? views.filter(x => x !== v) : [...views, v])}
+                  disabled={!!operation}
                 >
                   {v}
                 </Button>
               ))}
             </div>
+            {operation && <p className="text-xs text-slate-400">Вид нельзя изменить при редактировании</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -341,12 +448,13 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
             </div>
             <div className="space-y-1.5">
               <Label>Контрагент</Label>
-              <Select value={counterpartyId} onValueChange={setCounterpartyId}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {counterparties.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <CounterpartySelect
+                value={counterpartyId}
+                onChange={setCounterpartyId}
+                counterparties={counterparties}
+                onCreated={onCounterpartyCreated}
+                preferredId={type === 'Приход' && project ? project.counterparty_id : undefined}
+              />
             </div>
           </div>
 
@@ -365,7 +473,7 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
               <Select value={stageId} onValueChange={setStageId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {availableStages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  {stages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -406,6 +514,15 @@ function OperationFormDialog({ open, onClose, operation, projects, counterpartie
             <Label>Комментарий</Label>
             <Input value={comment} onChange={e => setComment(e.target.value)} />
           </div>
+
+          {operation?.parent_id && (
+            <div className="flex items-center gap-2">
+              <Checkbox id="updateLinked" checked={updateLinked} onCheckedChange={(v) => setUpdateLinked(Boolean(v))} />
+              <Label htmlFor="updateLinked" className="text-sm font-normal cursor-pointer">
+                Обновить связанные операции ({operation.parent_id})
+              </Label>
+            </div>
+          )}
 
           <div className="flex gap-2 pt-2">
             <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700">

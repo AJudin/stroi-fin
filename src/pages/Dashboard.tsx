@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import type { Operation } from '@/types';
+import type { Operation, Project } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,11 +56,13 @@ function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, i
 
 export default function Dashboard() {
   const [operations, setOperations] = useState<Operation[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [openBlock, setOpenBlock] = useState<string | null>('management');
   const [showRecords, setShowRecords] = useState(false);
 
   useEffect(() => {
     pocketbaseService.getOperations().then(setOperations);
+    pocketbaseService.getProjects().then(setProjects);
   }, []);
 
   const kpi = useMemo(() => {
@@ -127,6 +129,13 @@ export default function Dashboard() {
     [operations]
   );
 
+  const unsignedContracts = useMemo(() => {
+    const list: { project: Project; contract: Project['contracts'][number] }[] = [];
+    projects.forEach(p => {
+      p.contracts?.filter(c => c.status === 'Не подписан').forEach(c => list.push({ project: p, contract: c }));
+    });
+    return list.sort((a, b) => new Date(a.project.start_date).getTime() - new Date(b.project.start_date).getTime());
+  }, [projects]);
 
   const blockRecords = useMemo(() => {
     const viewFilter = openBlock === 'management' ? 'Управленческий учёт' :
@@ -306,22 +315,25 @@ export default function Dashboard() {
             <div className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-red-500" />
               <CardTitle className="text-base">Не подписанные договоры</CardTitle>
+              {unsignedContracts.length > 0 && (
+                <Badge variant="destructive" className="text-xs">{unsignedContracts.length}</Badge>
+              )}
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="space-y-2">
-                          {[
-                { name: 'Складской комплекс — Электромонтаж', contract: 'Д-2026-089', amount: 3200000, date: '2026-05-01' },
-                { name: 'ЖК "Солнечный"', contract: 'Д-2026-001-Д1', amount: 1200000, date: '2026-02-01' },
-              ].map((item, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+            <div className="space-y-2 max-h-64 overflow-auto">
+              {unsignedContracts.map(({ project, contract }) => (
+                <div key={`${project.id}-${contract.id}`} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                   <div>
-                    <p className="text-sm font-medium">{item.name}</p>
-                    <p className="text-xs text-slate-500">{item.contract} | {item.amount.toLocaleString('ru-RU')} ₽</p>
+                    <p className="text-sm font-medium">{project.name}</p>
+                    <p className="text-xs text-slate-500">{contract.number || '—'} | {contract.amount.toLocaleString('ru-RU')} ₽ | {new Date(project.start_date).toLocaleDateString('ru-RU')}</p>
                   </div>
                   <Badge variant="destructive" className="text-xs">Не подписан</Badge>
                 </div>
               ))}
+              {unsignedContracts.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">Все договоры подписаны</p>
+              )}
             </div>
           </CardContent>
         </Card>
