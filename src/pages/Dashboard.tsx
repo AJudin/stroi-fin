@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Operation, Project, Counterparty, Category, Stage, Contract } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
+import { useAuth } from '@/context/AuthContext';
 import OperationFormDialog from '@/components/OperationFormDialog';
 import {
   AlertDialog,
@@ -68,6 +69,8 @@ function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, i
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [operations, setOperations] = useState<Operation[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
@@ -100,6 +103,11 @@ export default function Dashboard() {
 
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleArchive = async (id: string) => {
+    await pocketbaseService.archiveOperation(id);
+    await loadData();
   };
 
   const handleConfirmStatus = async () => {
@@ -354,6 +362,7 @@ export default function Dashboard() {
         stages={stages.map(s => ({ id: s.id, name: s.name }))}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onArchive={isAdmin && editingOp ? () => { handleArchive(editingOp.id); setIsFormOpen(false); setEditingOp(null); } : undefined}
       />
 
       {/* Alerts */}

@@ -105,6 +105,11 @@ export default function ProjectDetail() {
     setCounterparties(prev => [...prev, c]);
   };
 
+  const handleArchive = async (id: string) => {
+    await pocketbaseService.archiveOperation(id);
+    await loadData();
+  };
+
   const handleConfirmStatus = async () => {
     if (!confirmStatus.target) return;
     if (confirmStatus.type === 'contract' && confirmStatus.projectId) {
@@ -566,6 +571,7 @@ export default function ProjectDetail() {
         stages={stages}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onArchive={isAdmin && editingOp ? () => { handleArchive(editingOp.id); setIsOpFormOpen(false); setEditingOp(null); } : undefined}
       />
 
       {/* Status Change Confirmation */}

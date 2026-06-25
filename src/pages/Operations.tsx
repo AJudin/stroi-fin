@@ -122,6 +122,13 @@ export default function Operations() {
     await loadData();
   };
 
+  const handleArchiveEditing = () => {
+    if (!editingOp) return;
+    handleArchive(editingOp.id);
+    setIsFormOpen(false);
+    setEditingOp(null);
+  };
+
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
   };
@@ -292,6 +299,7 @@ export default function Operations() {
         stages={stages}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onArchive={isAdmin ? handleArchiveEditing : undefined}
       />
     </div>
   );
