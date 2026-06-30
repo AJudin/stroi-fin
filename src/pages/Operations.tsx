@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Operation, Counterparty, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
@@ -33,13 +33,78 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Plus, Search, Download, Link2, ArrowUpDown, Calendar as CalendarIcon, X } from 'lucide-react';
+import { Plus, Search, Download, Link2, ArrowUpDown, Calendar as CalendarIcon, X, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { DateRange } from 'react-day-picker';
 
 type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'stage_name' | 'amount' | 'legal_entity_name';
 
 type FilterKey = 'date' | 'project' | 'view' | 'type' | 'counterparty' | 'category' | 'stage' | 'legalEntity' | 'actStatus' | 'paymentStatus' | 'amount' | 'comment';
+
+function parseIsoDate(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function CalendarDragSelector({ selected, onSelect }: { selected?: DateRange; onSelect: (range?: DateRange) => void }) {
+  const [dragRange, setDragRange] = useState<DateRange | undefined>(selected);
+  const [isDragging, setIsDragging] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const dayFromPoint = (clientX: number, clientY: number): Date | null => {
+    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    if (!el) return null;
+    const dayEl = el.closest('[data-day]') as HTMLElement | null;
+    const iso = dayEl?.getAttribute('data-day');
+    return iso ? parseIsoDate(iso) : null;
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const day = dayFromPoint(e.clientX, e.clientY);
+    if (!day) return;
+    setIsDragging(true);
+    setDragRange({ from: day, to: day });
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    const day = dayFromPoint(e.clientX, e.clientY);
+    if (!day) return;
+    setDragRange(prev => ({ from: prev?.from || day, to: day }));
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!isDragging) return;
+    e.preventDefault();
+    setIsDragging(false);
+    const range = dragRange?.from
+      ? { from: dragRange.from, to: dragRange.to || dragRange.from }
+      : undefined;
+    setDragRange(undefined);
+    if (range?.from) {
+      onSelect(range);
+    }
+  };
+
+  return (
+    <div
+      ref={wrapperRef}
+      className="touch-none select-none"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <Calendar
+        mode="range"
+        className="[--cell-size:3rem] text-base"
+        selected={dragRange || selected}
+      />
+    </div>
+  );
+}
 
 type AmountFilter = { min: string; max: string };
 
@@ -92,6 +157,7 @@ export default function Operations() {
 
   // Dynamic filters
   const [activeFilters, setActiveFilters] = useState<FilterKey[]>(['view', 'type', 'project', 'legalEntity']);
+
   const [filterValues, setFilterValues] = useState<{
     date?: DateRange;
     project: string;
@@ -169,12 +235,23 @@ export default function Operations() {
     setFilterValues(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleDateSelect = (range?: DateRange) => {
-    setFilterValues(prev => ({ ...prev, date: range }));
-    if (range?.from && range.to) {
-      setDatePopoverOpen(false);
-      addFilter('date');
-    }
+  const resetFilters = () => {
+    setSearchQuery('');
+    setActiveFilters(['view', 'type', 'project', 'legalEntity']);
+    setFilterValues({
+      project: 'all',
+      view: 'all',
+      type: 'all',
+      counterparty: 'all',
+      category: 'all',
+      stage: 'all',
+      legalEntity: 'all',
+      actStatus: 'all',
+      paymentStatus: 'all',
+      amount: { min: '', max: '' },
+      comment: '',
+    });
+    setSortConfig({ key: null, direction: 'desc' });
   };
 
   const handleSort = (key: SortKey) => {
@@ -521,12 +598,17 @@ export default function Operations() {
                 <CalendarIcon className="w-4 h-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="range"
+            <PopoverContent className="w-auto p-4" align="start">
+              <div className="text-sm text-slate-500 mb-2">Зажмите мышь на первой дате и потяните до конца периода</div>
+              <CalendarDragSelector
                 selected={filterValues.date}
-                onSelect={handleDateSelect}
-                initialFocus
+                onSelect={(range) => {
+                  setFilterValues(prev => ({ ...prev, date: range }));
+                  if (range?.from && range.to) {
+                    addFilter('date');
+                    setDatePopoverOpen(false);
+                  }
+                }}
               />
             </PopoverContent>
           </Popover>
@@ -549,6 +631,11 @@ export default function Operations() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Reset filters */}
+          <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
+            <RotateCcw className="w-4 h-4 mr-1" /> Сброс
+          </Button>
         </div>
       </Card>
 
