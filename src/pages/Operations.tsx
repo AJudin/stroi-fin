@@ -21,10 +21,57 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Plus, Search, Download, Link2, ArrowUpDown } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Plus, Search, Download, Link2, ArrowUpDown, Calendar as CalendarIcon, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import type { DateRange } from 'react-day-picker';
 
-type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'amount' | 'legal_entity_name';
+type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'stage_name' | 'amount' | 'legal_entity_name';
+
+type FilterKey = 'date' | 'project' | 'view' | 'type' | 'counterparty' | 'category' | 'stage' | 'legalEntity' | 'actStatus' | 'paymentStatus' | 'amount' | 'comment';
+
+type AmountFilter = { min: string; max: string };
+
+const FILTER_LABELS: Record<FilterKey, string> = {
+  date: 'Дата',
+  project: 'Проект',
+  view: 'Вид',
+  type: 'Тип',
+  counterparty: 'Контрагент',
+  category: 'Статья',
+  stage: 'Этап',
+  legalEntity: 'Моё ЮЛ',
+  actStatus: 'Статус акта',
+  paymentStatus: 'Статус оплаты',
+  amount: 'Сумма',
+  comment: 'Комментарий',
+};
+
+const ALL_FILTER_KEYS: FilterKey[] = ['date', 'project', 'view', 'type', 'counterparty', 'category', 'stage', 'legalEntity', 'actStatus', 'paymentStatus', 'amount', 'comment'];
+
+function formatDate(d?: Date) {
+  if (!d) return '';
+  return d.toLocaleDateString('ru-RU');
+}
+
+function dateStr(d?: Date) {
+  if (!d) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function Operations() {
   const [searchParams] = useSearchParams();
@@ -32,20 +79,46 @@ export default function Operations() {
   const isAdmin = authUser?.role === 'admin';
   const isOperator = authUser?.role === 'operator';
   const [operations, setOperations] = useState<Operation[]>([]);
-  const [projects, setProjects] = useState<{ id: string; name: string; counterparty_id: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: string; name: string; counterparty_id: string; legal_entity_id?: string }[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
   const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
-  const [legalEntityFilter, setLegalEntityFilter] = useState<string>('all');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; target: Operation | null; field: 'act_status' | 'payment_status' | null; nextStatus?: string }>({ open: false, target: null, field: null });
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewFilter, setViewFilter] = useState<string>(searchParams.get('view') || 'all');
-  const [typeFilter, setTypeFilter] = useState<string>(searchParams.get('type') || 'all');
-  const [projectFilter, setProjectFilter] = useState<string>(searchParams.get('project_id') || 'all');
   const [sortConfig, setSortConfig] = useState<{ key: SortKey | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'desc' });
+
+  // Dynamic filters
+  const [activeFilters, setActiveFilters] = useState<FilterKey[]>(['view', 'type', 'project', 'legalEntity']);
+  const [filterValues, setFilterValues] = useState<{
+    date?: DateRange;
+    project: string;
+    view: string;
+    type: string;
+    counterparty: string;
+    category: string;
+    stage: string;
+    legalEntity: string;
+    actStatus: string;
+    paymentStatus: string;
+    amount: AmountFilter;
+    comment: string;
+  }>({
+    project: searchParams.get('project_id') || 'all',
+    view: searchParams.get('view') || 'all',
+    type: searchParams.get('type') || 'all',
+    counterparty: 'all',
+    category: 'all',
+    stage: 'all',
+    legalEntity: 'all',
+    actStatus: 'all',
+    paymentStatus: 'all',
+    amount: { min: '', max: '' },
+    comment: '',
+  });
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -61,12 +134,48 @@ export default function Operations() {
       pocketbaseService.getLegalEntities(),
     ]);
     setOperations(ops);
-    setProjects(projs.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id })));
+    setProjects(projs.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id, legal_entity_id: p.legal_entity_id })));
     setCounterparties(contrs);
     setCategories(cats.map(c => ({ id: c.id, name: c.name, type: c.type })));
     setStages(sts.map(s => ({ id: s.id, name: s.name })));
     setLegalEntities(les);
   }
+
+  const addFilter = (key: FilterKey) => {
+    if (!activeFilters.includes(key)) {
+      setActiveFilters(prev => [...prev, key]);
+    }
+  };
+
+  const removeFilter = (key: FilterKey) => {
+    setActiveFilters(prev => prev.filter(k => k !== key));
+    setFilterValues(prev => {
+      const next = { ...prev };
+      if (key === 'date') {
+        delete next.date;
+      } else if (key === 'amount') {
+        next.amount = { min: '', max: '' };
+      } else if (key === 'comment') {
+        next.comment = '';
+      } else {
+        (next as any)[key] = 'all';
+      }
+      return next;
+    });
+    if (key === 'date') setDatePopoverOpen(false);
+  };
+
+  const setFilter = (key: Exclude<FilterKey, 'date' | 'amount'>, value: string) => {
+    setFilterValues(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleDateSelect = (range?: DateRange) => {
+    setFilterValues(prev => ({ ...prev, date: range }));
+    if (range?.from && range.to) {
+      setDatePopoverOpen(false);
+      addFilter('date');
+    }
+  };
 
   const handleSort = (key: SortKey) => {
     setSortConfig(prev => {
@@ -85,10 +194,28 @@ export default function Operations() {
     const list = operations.filter(op => {
       if (searchQuery && !op.counterparty_name?.toLowerCase().includes(searchQuery.toLowerCase()) &&
         !op.project_name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-      if (viewFilter !== 'all' && op.view !== viewFilter) return false;
-      if (typeFilter !== 'all' && op.type !== typeFilter) return false;
-      if (projectFilter !== 'all' && op.project_id !== projectFilter) return false;
-      if (legalEntityFilter !== 'all' && op.legal_entity_id !== legalEntityFilter) return false;
+
+      if (filterValues.date?.from && filterValues.date?.to) {
+        const from = dateStr(filterValues.date.from);
+        const to = dateStr(filterValues.date.to);
+        if (op.date < from || op.date > to) return false;
+      }
+      if (activeFilters.includes('project') && filterValues.project !== 'all' && op.project_id !== filterValues.project) return false;
+      if (activeFilters.includes('view') && filterValues.view !== 'all' && op.view !== filterValues.view) return false;
+      if (activeFilters.includes('type') && filterValues.type !== 'all' && op.type !== filterValues.type) return false;
+      if (activeFilters.includes('counterparty') && filterValues.counterparty !== 'all' && op.counterparty_id !== filterValues.counterparty) return false;
+      if (activeFilters.includes('category') && filterValues.category !== 'all' && op.category_id !== filterValues.category) return false;
+      if (activeFilters.includes('stage') && filterValues.stage !== 'all' && op.stage_id !== filterValues.stage) return false;
+      if (activeFilters.includes('legalEntity') && filterValues.legalEntity !== 'all' && op.legal_entity_id !== filterValues.legalEntity) return false;
+      if (activeFilters.includes('actStatus') && filterValues.actStatus !== 'all' && op.act_status !== filterValues.actStatus) return false;
+      if (activeFilters.includes('paymentStatus') && filterValues.paymentStatus !== 'all' && op.payment_status !== filterValues.paymentStatus) return false;
+      if (activeFilters.includes('amount')) {
+        const min = parseFloat(filterValues.amount.min);
+        const max = parseFloat(filterValues.amount.max);
+        if (!isNaN(min) && op.amount < min) return false;
+        if (!isNaN(max) && op.amount > max) return false;
+      }
+      if (activeFilters.includes('comment') && filterValues.comment && !op.comment.toLowerCase().includes(filterValues.comment.toLowerCase())) return false;
       return true;
     });
 
@@ -110,7 +237,7 @@ export default function Operations() {
     });
 
     return list;
-  }, [operations, searchQuery, viewFilter, typeFilter, projectFilter, legalEntityFilter, sortConfig]);
+  }, [operations, searchQuery, filterValues, activeFilters, sortConfig]);
 
   const handleExport = () => {
     const data = filteredOps.map(op => ({
@@ -176,6 +303,19 @@ export default function Operations() {
     </TableHead>
   );
 
+  const inactiveFilters = ALL_FILTER_KEYS.filter(k => !activeFilters.includes(k));
+  const dateActive = activeFilters.includes('date') && filterValues.date?.from && filterValues.date?.to;
+
+  const FilterBadge = ({ filterKey, children }: { filterKey: FilterKey; children: React.ReactNode }) => (
+    <div className="flex items-center gap-1 bg-slate-50 border rounded-md pl-2 pr-1 py-1">
+      <span className="text-xs text-slate-500 whitespace-nowrap">{FILTER_LABELS[filterKey]}</span>
+      {children}
+      <Button type="button" variant="ghost" size="icon" className="h-5 w-5 ml-1" onClick={() => removeFilter(filterKey)}>
+        <X className="w-3 h-3 text-slate-400" />
+      </Button>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -194,42 +334,221 @@ export default function Operations() {
 
       {/* Filters */}
       <Card className="p-4">
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-400" />
             <Input placeholder="Поиск..." className="pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
-          <Select value={viewFilter} onValueChange={setViewFilter}>
-            <SelectTrigger className="w-44"><SelectValue placeholder="Вид" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все виды</SelectItem>
-              <SelectItem value="Управленческий учёт">Управленческий учёт</SelectItem>
-              <SelectItem value="Актирование">Актирование</SelectItem>
-              <SelectItem value="Касса">Касса</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={typeFilter} onValueChange={setTypeFilter}>
-            <SelectTrigger className="w-36"><SelectValue placeholder="Тип" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все типы</SelectItem>
-              <SelectItem value="Приход">Приход</SelectItem>
-              <SelectItem value="Расход">Расход</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={projectFilter} onValueChange={setProjectFilter}>
-            <SelectTrigger className="w-52"><SelectValue placeholder="Проект" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все проекты</SelectItem>
-              {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={legalEntityFilter} onValueChange={setLegalEntityFilter}>
-            <SelectTrigger className="w-52"><SelectValue placeholder="Моё ЮЛ" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все ЮЛ</SelectItem>
-              {legalEntities.map(le => <SelectItem key={le.id} value={le.id}>{le.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+
+          {/* Date filter chip */}
+          {dateActive && (
+            <FilterBadge filterKey="date">
+              <span className="text-sm whitespace-nowrap">
+                {formatDate(filterValues.date?.from)} — {formatDate(filterValues.date?.to)}
+              </span>
+            </FilterBadge>
+          )}
+
+          {/* Active select filters */}
+          {activeFilters.includes('view') && (
+            <FilterBadge filterKey="view">
+              <Select value={filterValues.view} onValueChange={v => setFilter('view', v)}>
+                <SelectTrigger className="w-36 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все виды</SelectItem>
+                  <SelectItem value="Управленческий учёт">Управленческий учёт</SelectItem>
+                  <SelectItem value="Актирование">Актирование</SelectItem>
+                  <SelectItem value="Касса">Касса</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('type') && (
+            <FilterBadge filterKey="type">
+              <Select value={filterValues.type} onValueChange={v => setFilter('type', v)}>
+                <SelectTrigger className="w-28 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все типы</SelectItem>
+                  <SelectItem value="Приход">Приход</SelectItem>
+                  <SelectItem value="Расход">Расход</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('project') && (
+            <FilterBadge filterKey="project">
+              <Select value={filterValues.project} onValueChange={v => setFilter('project', v)}>
+                <SelectTrigger className="w-40 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все проекты</SelectItem>
+                  {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('counterparty') && (
+            <FilterBadge filterKey="counterparty">
+              <Select value={filterValues.counterparty} onValueChange={v => setFilter('counterparty', v)}>
+                <SelectTrigger className="w-40 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все контрагенты</SelectItem>
+                  {counterparties.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('category') && (
+            <FilterBadge filterKey="category">
+              <Select value={filterValues.category} onValueChange={v => setFilter('category', v)}>
+                <SelectTrigger className="w-40 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все статьи</SelectItem>
+                  {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('stage') && (
+            <FilterBadge filterKey="stage">
+              <Select value={filterValues.stage} onValueChange={v => setFilter('stage', v)}>
+                <SelectTrigger className="w-40 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все этапы</SelectItem>
+                  {stages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('legalEntity') && (
+            <FilterBadge filterKey="legalEntity">
+              <Select value={filterValues.legalEntity} onValueChange={v => setFilter('legalEntity', v)}>
+                <SelectTrigger className="w-40 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все ЮЛ</SelectItem>
+                  {legalEntities.map(le => <SelectItem key={le.id} value={le.id}>{le.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('actStatus') && (
+            <FilterBadge filterKey="actStatus">
+              <Select value={filterValues.actStatus} onValueChange={v => setFilter('actStatus', v)}>
+                <SelectTrigger className="w-36 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все статусы</SelectItem>
+                  <SelectItem value="Подписан">Подписан</SelectItem>
+                  <SelectItem value="Не подписан">Не подписан</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('paymentStatus') && (
+            <FilterBadge filterKey="paymentStatus">
+              <Select value={filterValues.paymentStatus} onValueChange={v => setFilter('paymentStatus', v)}>
+                <SelectTrigger className="w-36 h-7 border-0 bg-transparent shadow-none px-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все статусы</SelectItem>
+                  <SelectItem value="Оплачен">Оплачен</SelectItem>
+                  <SelectItem value="Не оплачен">Не оплачен</SelectItem>
+                </SelectContent>
+              </Select>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('amount') && (
+            <FilterBadge filterKey="amount">
+              <div className="flex items-center gap-1">
+                <Input
+                  type="number"
+                  placeholder="от"
+                  className="w-20 h-7 px-1 text-sm"
+                  value={filterValues.amount.min}
+                  onChange={e => setFilterValues(prev => ({ ...prev, amount: { ...prev.amount, min: e.target.value } }))}
+                />
+                <span className="text-slate-400">—</span>
+                <Input
+                  type="number"
+                  placeholder="до"
+                  className="w-20 h-7 px-1 text-sm"
+                  value={filterValues.amount.max}
+                  onChange={e => setFilterValues(prev => ({ ...prev, amount: { ...prev.amount, max: e.target.value } }))}
+                />
+              </div>
+            </FilterBadge>
+          )}
+
+          {activeFilters.includes('comment') && (
+            <FilterBadge filterKey="comment">
+              <Input
+                placeholder="Поиск по комментарию"
+                className="w-40 h-7 px-1 text-sm border-0 bg-transparent shadow-none"
+                value={filterValues.comment}
+                onChange={e => setFilterValues(prev => ({ ...prev, comment: e.target.value }))}
+              />
+            </FilterBadge>
+          )}
+
+          {/* Calendar filter */}
+          <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="icon" className={dateActive ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : ''}>
+                <CalendarIcon className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="range"
+                selected={filterValues.date}
+                onSelect={handleDateSelect}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+
+          {/* Add filter */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="icon">
+                <Plus className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-80 overflow-auto">
+              {inactiveFilters.length === 0 && (
+                <DropdownMenuItem disabled>Все фильтры добавлены</DropdownMenuItem>
+              )}
+              {inactiveFilters.map(key => (
+                <DropdownMenuItem key={key} onClick={() => addFilter(key)}>
+                  {FILTER_LABELS[key]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </Card>
 
@@ -246,6 +565,7 @@ export default function Operations() {
                   <SortableHeader keyName="type">Тип</SortableHeader>
                   <SortableHeader keyName="counterparty_name">Контрагент</SortableHeader>
                   <SortableHeader keyName="category_name">Статья</SortableHeader>
+                  <SortableHeader keyName="stage_name">Этап</SortableHeader>
                   <SortableHeader keyName="amount" className="text-right">Сумма</SortableHeader>
                   <SortableHeader keyName="legal_entity_name">Моё ЮЛ</SortableHeader>
                   <TableHead>Статус</TableHead>
@@ -280,6 +600,7 @@ export default function Operations() {
                     </TableCell>
                     <TableCell className="text-sm">{op.counterparty_name}</TableCell>
                     <TableCell className="text-sm">{op.category_name}</TableCell>
+                    <TableCell className="text-sm">{op.stage_name}</TableCell>
                     <TableCell className={`text-right font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽
                     </TableCell>
@@ -314,7 +635,7 @@ export default function Operations() {
                 ))}
                 {filteredOps.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-slate-400 py-12">Нет операций</TableCell>
+                    <TableCell colSpan={10} className="text-center text-slate-400 py-12">Нет операций</TableCell>
                   </TableRow>
                 )}
               </TableBody>
