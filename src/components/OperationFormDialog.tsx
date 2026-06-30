@@ -54,6 +54,7 @@ export default function OperationFormDialog({
   const [viewError, setViewError] = useState(false);
 
   const project = useMemo(() => projects.find(p => p.id === projectId), [projects, projectId]);
+  const needsLegalEntity = views.some(v => v === 'Актирование' || v === 'Касса');
 
   // Auto-select customer counterparty for income operations
   useEffect(() => {
@@ -62,12 +63,12 @@ export default function OperationFormDialog({
     }
   }, [type, project]);
 
-  // Auto-select project's legal entity for acts/cash when empty
+  // Auto-select project's legal entity when empty
   useEffect(() => {
-    if (project && !legalEntityId && views.some(v => v === 'Актирование' || v === 'Касса')) {
+    if (project && !legalEntityId) {
       setLegalEntityId(project.legal_entity_id || '');
     }
-  }, [project, views]);
+  }, [project]);
 
   // Filter categories by operation type
   const availableCategories = useMemo(() =>
@@ -119,7 +120,6 @@ export default function OperationFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
-    const needsLegalEntity = views.some(v => v === 'Актирование' || v === 'Касса');
     const isValid = numAmount && projectId && counterpartyId && categoryId && stageId && views.length > 0 && (!needsLegalEntity || legalEntityId);
     setViewError(views.length === 0);
     if (!isValid) return;
@@ -127,7 +127,7 @@ export default function OperationFormDialog({
     const baseData = {
       date, project_id: projectId, type,
       counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
-      legal_entity_id: needsLegalEntity ? legalEntityId : undefined,
+      legal_entity_id: legalEntityId || undefined,
       comment, amount: numAmount,
       is_archived: false,
     };
@@ -146,7 +146,7 @@ export default function OperationFormDialog({
         const updatePayload = {
           date, project_id: projectId, type,
           counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
-          legal_entity_id: operation.view === 'Актирование' || operation.view === 'Касса' ? legalEntityId : undefined,
+          legal_entity_id: legalEntityId || undefined,
           comment, amount: numAmount,
         };
         await Promise.all(
@@ -300,18 +300,16 @@ export default function OperationFormDialog({
               </div>
             </div>
 
-            {(views.includes('Актирование') || views.includes('Касса')) && (
-              <div className="space-y-1.5">
-                <Label>Моё юридическое лицо</Label>
-                <LegalEntitySelect
-                  value={legalEntityId}
-                  onChange={setLegalEntityId}
-                  legalEntities={legalEntities}
-                  onCreated={onLegalEntityCreated}
-                  required
-                />
-              </div>
-            )}
+            <div className="space-y-1.5">
+              <Label>Моё юридическое лицо</Label>
+              <LegalEntitySelect
+                value={legalEntityId}
+                onChange={setLegalEntityId}
+                legalEntities={legalEntities}
+                onCreated={onLegalEntityCreated}
+                required={needsLegalEntity}
+              />
+            </div>
 
             <div className="space-y-1.5">
               <Label>Сумма</Label>
