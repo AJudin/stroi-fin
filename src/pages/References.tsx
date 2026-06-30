@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Pencil, Archive, RotateCcw } from 'lucide-react';
+import { Plus, Archive, RotateCcw } from 'lucide-react';
 
 type Scope = 'global' | 'project';
 type GlobalSubTab = 'counterparties' | 'categories' | 'stages';
@@ -93,28 +93,26 @@ export default function References() {
             {counterparties
               .filter(c => c.is_archived === showArchived)
               .map(item => (
-                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                <TableRow
+                  key={item.id}
+                  className={`${item.is_archived ? 'opacity-50' : ''} cursor-pointer hover:bg-slate-50`}
+                  onClick={() => openEdit(item, 'counterparty')}
+                >
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell>{item.inn}</TableCell>
                   <TableCell><Badge variant="outline">{item.type}</Badge></TableCell>
                   {isAdmin && (
-                    <TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
                       {showArchived ? (
                         <Button variant="ghost" size="icon" className="h-8 w-8"
                           onClick={() => handleRestore(item.id, 'counterparties')}>
                           <RotateCcw className="w-3.5 h-3.5" />
                         </Button>
                       ) : (
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8"
-                            onClick={() => openEdit(item, 'counterparty')}>
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
-                            onClick={() => handleArchive(item.id, 'counterparties')}>
-                            <Archive className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
+                          onClick={() => handleArchive(item.id, 'counterparties')}>
+                          <Archive className="w-3.5 h-3.5" />
+                        </Button>
                       )}
                     </TableCell>
                   )}
@@ -145,27 +143,26 @@ export default function References() {
             </TableHeader>
             <TableBody>
               {list.map(item => (
-                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                <TableRow
+                  key={item.id}
+                  className={`${item.is_archived ? 'opacity-50' : ''} cursor-pointer hover:bg-slate-50`}
+                  onClick={() => openEdit(item, 'category')}
+                >
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell><Badge className={item.type === 'Приход' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>{item.type}</Badge></TableCell>
                   {scope === 'project' && (
                     <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
                   )}
                   {isAdmin && (
-                    <TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
                       {showArchived ? (
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'categories')}>
                           <RotateCcw className="w-3.5 h-3.5" />
                         </Button>
                       ) : (
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item, 'category')}>
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'categories')}>
-                            <Archive className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'categories')}>
+                          <Archive className="w-3.5 h-3.5" />
+                        </Button>
                       )}
                     </TableCell>
                   )}
@@ -197,27 +194,26 @@ export default function References() {
             </TableHeader>
             <TableBody>
               {list.sort((a, b) => a.order - b.order).map(item => (
-                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                <TableRow
+                  key={item.id}
+                  className={`${item.is_archived ? 'opacity-50' : ''} cursor-pointer hover:bg-slate-50`}
+                  onClick={() => openEdit(item, 'stage')}
+                >
                   <TableCell className="font-medium">{item.name}</TableCell>
                   <TableCell>{item.order}</TableCell>
                   {scope === 'project' && (
                     <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
                   )}
                   {isAdmin && (
-                    <TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
                       {showArchived ? (
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'stages')}>
                           <RotateCcw className="w-3.5 h-3.5" />
                         </Button>
                       ) : (
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item, 'stage')}>
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'stages')}>
-                            <Archive className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'stages')}>
+                          <Archive className="w-3.5 h-3.5" />
+                        </Button>
                       )}
                     </TableCell>
                   )}
