@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Operation, Counterparty, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
@@ -41,67 +41,33 @@ type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' |
 
 type FilterKey = 'date' | 'project' | 'view' | 'type' | 'counterparty' | 'category' | 'stage' | 'legalEntity' | 'actStatus' | 'paymentStatus' | 'amount' | 'comment';
 
-function parseIsoDate(iso: string): Date {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function CalendarDragSelector({ selected, onSelect }: { selected?: DateRange; onSelect: (range?: DateRange) => void }) {
-  const [dragRange, setDragRange] = useState<DateRange | undefined>(selected);
-  const [isDragging, setIsDragging] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  const dayFromPoint = (clientX: number, clientY: number): Date | null => {
-    const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
-    if (!el) return null;
-    const dayEl = el.closest('[data-day]') as HTMLElement | null;
-    const iso = dayEl?.getAttribute('data-day');
-    return iso ? parseIsoDate(iso) : null;
-  };
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    e.preventDefault();
-    const day = dayFromPoint(e.clientX, e.clientY);
-    if (!day) return;
-    setIsDragging(true);
-    setDragRange({ from: day, to: day });
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-    e.preventDefault();
-    const day = dayFromPoint(e.clientX, e.clientY);
-    if (!day) return;
-    setDragRange(prev => ({ from: prev?.from || day, to: day }));
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!isDragging) return;
-    e.preventDefault();
-    setIsDragging(false);
-    const range = dragRange?.from
-      ? { from: dragRange.from, to: dragRange.to || dragRange.from }
-      : undefined;
-    setDragRange(undefined);
-    if (range?.from) {
-      onSelect(range);
-    }
-  };
-
+function DateRangePicker({ value, onChange }: { value?: DateRange; onChange: (range?: DateRange) => void }) {
+  const [month, setMonth] = useState(new Date());
   return (
-    <div
-      ref={wrapperRef}
-      className="touch-none select-none"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-    >
+    <div className="space-y-3">
       <Calendar
         mode="range"
-        className="[--cell-size:3rem] text-base"
-        selected={dragRange || selected}
+        numberOfMonths={2}
+        month={month}
+        onMonthChange={setMonth}
+        selected={value}
+        onSelect={onChange}
+        className="[--cell-size:2.75rem] text-base"
       />
+      <div className="flex items-center justify-between border-t pt-3">
+        <div className="text-sm text-slate-600">
+          {value?.from && value.to
+            ? `${formatDate(value.from)} — ${formatDate(value.to)}`
+            : value?.from
+              ? `${formatDate(value.from)} — ...`
+              : 'Выберите даты'}
+        </div>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>
+            Очистить
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -599,14 +565,15 @@ export default function Operations() {
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-4" align="start">
-              <div className="text-sm text-slate-500 mb-2">Зажмите мышь на первой дате и потяните до конца периода</div>
-              <CalendarDragSelector
-                selected={filterValues.date}
-                onSelect={(range) => {
+              <DateRangePicker
+                value={filterValues.date}
+                onChange={(range) => {
                   setFilterValues(prev => ({ ...prev, date: range }));
                   if (range?.from && range.to) {
                     addFilter('date');
                     setDatePopoverOpen(false);
+                  } else if (!range) {
+                    removeFilter('date');
                   }
                 }}
               />
