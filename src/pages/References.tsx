@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Counterparty, Category, Stage, Project } from '@/types';
+import type { Counterparty, Category, Stage, Project, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Plus, Archive, RotateCcw } from 'lucide-react';
 
 type Scope = 'global' | 'project';
-type GlobalSubTab = 'counterparties' | 'categories' | 'stages';
+type GlobalSubTab = 'counterparties' | 'categories' | 'stages' | 'legal_entities';
 type ProjectSubTab = 'categories' | 'stages';
 
 export default function References() {
@@ -25,6 +25,7 @@ export default function References() {
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -37,15 +38,17 @@ export default function References() {
   }, []);
 
   async function loadData() {
-    const [cp, cats, sts, prjs] = await Promise.all([
+    const [cp, cats, sts, les, prjs] = await Promise.all([
       pocketbaseService.getAllCounterparties(),
       pocketbaseService.getAllCategories(),
       pocketbaseService.getAllStages(),
+      pocketbaseService.getAllLegalEntities(),
       pocketbaseService.getProjects(),
     ]);
     setCounterparties(cp);
     setCategories(cats);
     setStages(sts);
+    setLegalEntities(les);
     setProjects(prjs);
   }
 
@@ -53,6 +56,7 @@ export default function References() {
     if (collection === 'counterparties') await pocketbaseService.updateCounterparty(id, { is_archived: true });
     else if (collection === 'categories') await pocketbaseService.updateCategory(id, { is_archived: true });
     else if (collection === 'stages') await pocketbaseService.updateStage(id, { is_archived: true });
+    else if (collection === 'legal_entities') await pocketbaseService.updateLegalEntity(id, { is_archived: true });
     await loadData();
   };
 
@@ -60,6 +64,7 @@ export default function References() {
     if (collection === 'counterparties') await pocketbaseService.updateCounterparty(id, { is_archived: false });
     else if (collection === 'categories') await pocketbaseService.updateCategory(id, { is_archived: false });
     else if (collection === 'stages') await pocketbaseService.updateStage(id, { is_archived: false });
+    else if (collection === 'legal_entities') await pocketbaseService.updateLegalEntity(id, { is_archived: false });
     await loadData();
   };
 
@@ -68,13 +73,15 @@ export default function References() {
     setIsFormOpen(true);
   };
 
-  const openEdit = (item: any, type: 'counterparty' | 'category' | 'stage') => {
+  const openEdit = (item: any, type: 'counterparty' | 'category' | 'stage' | 'legal_entity') => {
     setEditingItem({ ...item, _type: type });
     setIsFormOpen(true);
   };
 
   const currentFormScope = editingItem
-    ? (editingItem.project_id === undefined ? 'global' : (editingItem.project_id ? 'project' : 'global'))
+    ? (editingItem._type === 'legal_entity' || editingItem.project_id === undefined
+        ? 'global'
+        : (editingItem.project_id ? 'project' : 'global'))
     : activeTab;
 
   const CounterpartiesTable = () => (
@@ -178,6 +185,53 @@ export default function References() {
     );
   };
 
+  const LegalEntitiesTable = () => {
+    const list = legalEntities.filter(le => le.is_archived === showArchived);
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Название</TableHead>
+                <TableHead>ИНН</TableHead>
+                {isAdmin && <TableHead className="w-20"></TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map(item => (
+                <TableRow
+                  key={item.id}
+                  className={`${item.is_archived ? 'opacity-50' : ''} cursor-pointer hover:bg-slate-50`}
+                  onClick={() => openEdit(item, 'legal_entity')}
+                >
+                  <TableCell className="font-medium">{item.name}</TableCell>
+                  <TableCell>{item.inn}</TableCell>
+                  {isAdmin && (
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      {showArchived ? (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'legal_entities')}>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'legal_entities')}>
+                          <Archive className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+              {list.length === 0 && (
+                <TableRow><TableCell colSpan={isAdmin ? 3 : 2} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
+
   const StagesTable = ({ scope }: { scope: Scope }) => {
     const list = stages.filter(s => s.is_archived === showArchived && (scope === 'global' ? !s.project_id : !!s.project_id));
     return (
@@ -255,10 +309,12 @@ export default function References() {
           <Tabs value={globalSubTab} onValueChange={(v) => setGlobalSubTab(v as GlobalSubTab)}>
             <TabsList>
               <TabsTrigger value="counterparties">Контрагенты</TabsTrigger>
+              <TabsTrigger value="legal_entities">Юр. лица</TabsTrigger>
               <TabsTrigger value="categories">Статьи</TabsTrigger>
               <TabsTrigger value="stages">Этапы</TabsTrigger>
             </TabsList>
             <TabsContent value="counterparties" className="mt-4"><CounterpartiesTable /></TabsContent>
+            <TabsContent value="legal_entities" className="mt-4"><LegalEntitiesTable /></TabsContent>
             <TabsContent value="categories" className="mt-4"><CategoriesTable scope="global" /></TabsContent>
             <TabsContent value="stages" className="mt-4"><StagesTable scope="global" /></TabsContent>
           </Tabs>
@@ -295,7 +351,8 @@ function ReferenceFormDialog({ open, onClose, item, scope, projects, onSaved }:
   }) {
   const determineFormType = () => {
     if (item?._type) return item._type;
-    return 'counterparty';
+    if (scope === 'global') return 'legal_entity';
+    return 'category';
   };
   const [formType, setFormType] = useState(determineFormType());
   const [name, setName] = useState(item?.name || '');
@@ -334,6 +391,9 @@ function ReferenceFormDialog({ open, onClose, item, scope, projects, onSaved }:
       if (projectId) payload.project_id = projectId;
       if (item) await pocketbaseService.updateStage(item.id, payload);
       else await pocketbaseService.createStage(payload as Omit<Stage, 'id' | 'created' | 'updated'>);
+    } else if (formType === 'legal_entity') {
+      if (item) await pocketbaseService.updateLegalEntity(item.id, { name, inn });
+      else await pocketbaseService.createLegalEntity({ name, inn, is_archived: false });
     }
     onSaved();
     onClose();
@@ -355,6 +415,7 @@ function ReferenceFormDialog({ open, onClose, item, scope, projects, onSaved }:
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="counterparty">Контрагент</SelectItem>
+                  <SelectItem value="legal_entity">Юр. лицо</SelectItem>
                   <SelectItem value="category">Статья</SelectItem>
                   <SelectItem value="stage">Этап</SelectItem>
                 </SelectContent>
@@ -367,23 +428,25 @@ function ReferenceFormDialog({ open, onClose, item, scope, projects, onSaved }:
             <Input value={name} onChange={e => setName(e.target.value)} required />
           </div>
 
-          {formType === 'counterparty' && (
+          {(formType === 'counterparty' || formType === 'legal_entity') && (
             <>
               <div className="space-y-1.5">
                 <Label>ИНН</Label>
                 <Input value={inn} onChange={e => setInn(e.target.value)} required />
               </div>
-              <div className="space-y-1.5">
-                <Label>Тип контрагента</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Заказчик">Заказчик</SelectItem>
-                    <SelectItem value="Поставщик">Поставщик</SelectItem>
-                    <SelectItem value="Подрядчик">Подрядчик</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {formType === 'counterparty' && (
+                <div className="space-y-1.5">
+                  <Label>Тип контрагента</Label>
+                  <Select value={type} onValueChange={setType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Заказчик">Заказчик</SelectItem>
+                      <SelectItem value="Поставщик">Поставщик</SelectItem>
+                      <SelectItem value="Подрядчик">Подрядчик</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </>
           )}
 

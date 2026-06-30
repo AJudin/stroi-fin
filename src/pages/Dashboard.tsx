@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Operation, Project, Counterparty, Category, Stage, Contract } from '@/types';
+import type { Operation, Project, Counterparty, Category, Stage, Contract, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import OperationFormDialog from '@/components/OperationFormDialog';
@@ -15,17 +15,13 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   BarChart3, TrendingUp, AlertTriangle,
-  FileText, FileCheck, ChevronDown, ChevronUp
+  FileText, FileCheck
 } from 'lucide-react';
-import {
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Line, ComposedChart, ReferenceLine, Label
-} from 'recharts';
 
 interface KPICardProps {
   title: string;
@@ -76,25 +72,28 @@ export default function Dashboard() {
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [openBlock, setOpenBlock] = useState<string | null>('management');
-  const [showRecords, setShowRecords] = useState(false);
+  const [activeLegalEntity, setActiveLegalEntity] = useState<string>('all');
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract' | 'op_act' | 'op_payment'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
 
   async function loadData() {
-    const [ops, prjs, contrs, cats, sts] = await Promise.all([
+    const [ops, prjs, contrs, cats, sts, les] = await Promise.all([
       pocketbaseService.getOperations(),
       pocketbaseService.getProjects(),
       pocketbaseService.getCounterparties(),
       pocketbaseService.getCategories(),
       pocketbaseService.getStages(),
+      pocketbaseService.getLegalEntities(),
     ]);
     setOperations(ops);
     setProjects(prjs);
     setCounterparties(contrs);
     setCategories(cats);
     setStages(sts);
+    setLegalEntities(les);
   }
 
   useEffect(() => {
@@ -103,6 +102,10 @@ export default function Dashboard() {
 
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleLegalEntityCreated = (le: LegalEntity) => {
+    setLegalEntities(prev => [...prev, le]);
   };
 
   const handleArchive = async (id: string) => {
@@ -154,39 +157,6 @@ export default function Dashboard() {
     };
   }, [operations]);
 
-  const cumulativeData = useMemo(() => {
-    const today = new Date('2026-06-24');
-    const dates: { date: Date; label: string }[] = [];
-    for (let i = -45; i <= 45; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() + i);
-      dates.push({
-        date: d,
-        label: d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-      });
-    }
-
-    const viewFilter = openBlock === 'management' ? 'Управленческий учёт' :
-      openBlock === 'acts' ? 'Актирование' : 'Касса';
-
-    const startDateStr = dates[0].date.toISOString().split('T')[0];
-    let cumulative = operations
-      .filter(o => o.view === viewFilter && !o.is_archived && o.date < startDateStr)
-      .reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0);
-
-    return dates.map(({ date, label }) => {
-      const dateStr = date.toISOString().split('T')[0];
-      const dayOps = operations.filter(o =>
-        o.view === viewFilter && !o.is_archived && o.date === dateStr
-      );
-      const income = dayOps.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
-      const expense = dayOps.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
-      const value = income - expense;
-      cumulative += value;
-      return { label, value, cumulative: Math.round(cumulative), isFuture: date > today };
-    });
-  }, [operations, openBlock]);
-
   const unsignedActs = useMemo(() =>
     operations.filter(o => o.view === 'Актирование' && o.act_status === 'Не подписан' && !o.is_archived)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
@@ -201,11 +171,43 @@ export default function Dashboard() {
     return list.sort((a, b) => new Date(a.project.start_date).getTime() - new Date(b.project.start_date).getTime());
   }, [projects]);
 
-  const blockRecords = useMemo(() => {
-    const viewFilter = openBlock === 'management' ? 'Управленческий учёт' :
+  const currentView = useMemo(() => {
+    return openBlock === 'management' ? 'Управленческий учёт' :
       openBlock === 'acts' ? 'Актирование' : 'Касса';
-    return operations.filter(o => o.view === viewFilter && !o.is_archived);
-  }, [operations, openBlock]);
+  }, [openBlock]);
+
+  const blockRecords = useMemo(() => {
+    if (!openBlock) return [];
+    return operations.filter(o => {
+      if (o.view !== currentView || o.is_archived) return false;
+      if ((openBlock === 'acts' || openBlock === 'cash') && activeLegalEntity !== 'all') {
+        return o.legal_entity_id === activeLegalEntity;
+      }
+      return true;
+    });
+  }, [operations, openBlock, currentView, activeLegalEntity]);
+
+  const blockBalance = useMemo(() => {
+    const income = blockRecords.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
+    const expense = blockRecords.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
+    const gross = income - expense;
+    if (openBlock === 'acts') {
+      const signedIncome = blockRecords.filter(o => o.type === 'Приход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
+      const signedExpense = blockRecords.filter(o => o.type === 'Расход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
+      return { primary: signedIncome - signedExpense, secondary: gross };
+    }
+    if (openBlock === 'cash') {
+      const paidIncome = blockRecords.filter(o => o.type === 'Приход' && o.payment_status === 'Оплачен').reduce((s, o) => s + o.amount, 0);
+      const paidExpense = blockRecords.filter(o => o.type === 'Расход' && o.payment_status === 'Оплачен').reduce((s, o) => s + o.amount, 0);
+      return { primary: paidIncome - paidExpense, secondary: gross };
+    }
+    return { primary: gross };
+  }, [blockRecords, openBlock]);
+
+  const activeLegalEntityName = useMemo(() => {
+    if (activeLegalEntity === 'all') return 'Все ЮЛ';
+    return legalEntities.find(le => le.id === activeLegalEntity)?.name || '—';
+  }, [activeLegalEntity, legalEntities]);
 
   return (
     <div className="space-y-6">
@@ -243,130 +245,120 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Chart */}
+      {/* Records block */}
       {openBlock && (
         <Card className="overflow-hidden">
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <CardTitle className="text-lg">
-                {openBlock === 'management' ? 'Управленческий учёт' :
-                  openBlock === 'acts' ? 'Актирование' : 'Касса'} — 90 дней
+                {currentView}
+                {(openBlock === 'acts' || openBlock === 'cash') && (
+                  <span className="text-slate-400 font-normal ml-2">— {activeLegalEntityName}</span>
+                )}
               </CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowRecords(!showRecords)}
-              >
-                {showRecords ? <ChevronUp className="w-4 h-4 mr-1" /> : <ChevronDown className="w-4 h-4 mr-1" />}
-                Записи
-              </Button>
+              {(openBlock === 'acts' || openBlock === 'cash') && legalEntities.length > 0 && (
+                <Tabs value={activeLegalEntity} onValueChange={setActiveLegalEntity}>
+                  <TabsList className="h-8 flex-wrap">
+                    <TabsTrigger value="all" className="text-xs">Все</TabsTrigger>
+                    {legalEntities.map(le => (
+                      <TabsTrigger key={le.id} value={le.id} className="text-xs">{le.name}</TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              )}
             </div>
           </CardHeader>
           <CardContent>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={cumulativeData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10 }}
-                    interval={14}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10 }}
-                    tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
-                  />
-                  <Tooltip
-                    formatter={(v: number) => [`${v.toLocaleString('ru-RU')} ₽`, 'Баланс']}
-                    labelFormatter={(l) => `Дата: ${l}`}
-                  />
-                  <ReferenceLine x={cumulativeData.find(d => !d.isFuture)?.label || ''} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={2}>
-                    <Label value="Сегодня" position="insideTopLeft" fill="#f59e0b" fontSize={10} />
-                  </ReferenceLine>
-                  <Line
-                    type="monotone"
-                    dataKey="cumulative"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    dot={false}
-                    strokeDasharray={undefined}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
+            <div className="flex gap-4 mb-4">
+              <div className="bg-slate-50 rounded-lg px-4 py-2">
+                <p className="text-xs text-slate-500">
+                  {openBlock === 'acts' ? 'Подписано' : openBlock === 'cash' ? 'Оплачено' : 'Баланс'}
+                </p>
+                <p className={`text-lg font-bold ${blockBalance.primary >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {blockBalance.primary.toLocaleString('ru-RU')} ₽
+                </p>
+              </div>
+              {blockBalance.secondary !== undefined && (
+                <div className="bg-slate-50 rounded-lg px-4 py-2">
+                  <p className="text-xs text-slate-500">Валовый баланс</p>
+                  <p className={`text-lg font-bold ${blockBalance.secondary >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {blockBalance.secondary.toLocaleString('ru-RU')} ₽
+                  </p>
+                </div>
+              )}
             </div>
 
-            {/* Records table */}
-            {showRecords && (
-              <div className="mt-4 border rounded-lg overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Дата</TableHead>
-                      <TableHead>Проект</TableHead>
-                      <TableHead>Контрагент</TableHead>
-                      <TableHead>Тип</TableHead>
-                      {openBlock !== 'management' && <TableHead>Статус</TableHead>}
-                      <TableHead className="text-right">Сумма</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {blockRecords.map(op => (
-                      <TableRow
-                        key={op.id}
-                        className="cursor-pointer hover:bg-slate-50"
-                        onClick={() => { setEditingOp(op); setIsFormOpen(true); }}
-                      >
-                        <TableCell>{new Date(op.date).toLocaleDateString('ru-RU')}</TableCell>
-                        <TableCell className="font-medium">{op.project_name}</TableCell>
-                        <TableCell>{op.counterparty_name}</TableCell>
+            <div className="border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Дата</TableHead>
+                    <TableHead>Проект</TableHead>
+                    <TableHead>Контрагент</TableHead>
+                    <TableHead>Тип</TableHead>
+                    {openBlock !== 'management' && <TableHead>Статус</TableHead>}
+                    <TableHead>Моё ЮЛ</TableHead>
+                    <TableHead className="text-right">Сумма</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {blockRecords.map(op => (
+                    <TableRow
+                      key={op.id}
+                      className="cursor-pointer hover:bg-slate-50"
+                      onClick={() => { setEditingOp(op); setIsFormOpen(true); }}
+                    >
+                      <TableCell>{new Date(op.date).toLocaleDateString('ru-RU')}</TableCell>
+                      <TableCell className="font-medium">{op.project_name}</TableCell>
+                      <TableCell>{op.counterparty_name}</TableCell>
+                      <TableCell>
+                        <Badge variant={op.type === 'Приход' ? 'default' : 'destructive'}
+                          className={op.type === 'Приход' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : ''}>
+                          {op.type}
+                        </Badge>
+                      </TableCell>
+                      {openBlock !== 'management' && (
                         <TableCell>
-                          <Badge variant={op.type === 'Приход' ? 'default' : 'destructive'}
-                            className={op.type === 'Приход' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : ''}>
-                            {op.type}
-                          </Badge>
+                          {op.act_status && openBlock === 'acts' && (
+                            <Badge
+                              variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                              className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
+                              onClick={e => {
+                                e.stopPropagation();
+                                const next = op.act_status === 'Подписан' ? 'Не подписан' : 'Подписан';
+                                setConfirmStatus({ open: true, type: 'op_act', target: op, nextStatus: next });
+                              }}
+                            >
+                              {op.act_status}
+                            </Badge>
+                          )}
+                          {op.payment_status && openBlock === 'cash' && (
+                            <Badge
+                              variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                              className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
+                              onClick={e => {
+                                e.stopPropagation();
+                                const next = op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен';
+                                setConfirmStatus({ open: true, type: 'op_payment', target: op, nextStatus: next });
+                              }}
+                            >
+                              {op.payment_status}
+                            </Badge>
+                          )}
                         </TableCell>
-                        {openBlock !== 'management' && (
-                          <TableCell>
-                            {op.act_status && openBlock === 'acts' && (
-                              <Badge
-                                variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
-                                className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  const next = op.act_status === 'Подписан' ? 'Не подписан' : 'Подписан';
-                                  setConfirmStatus({ open: true, type: 'op_act', target: op, nextStatus: next });
-                                }}
-                              >
-                                {op.act_status}
-                              </Badge>
-                            )}
-                            {op.payment_status && openBlock === 'cash' && (
-                              <Badge
-                                variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                                className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  const next = op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен';
-                                  setConfirmStatus({ open: true, type: 'op_payment', target: op, nextStatus: next });
-                                }}
-                              >
-                                {op.payment_status}
-                              </Badge>
-                            )}
-                          </TableCell>
-                        )}
-                        <TableCell className="text-right font-mono">{op.amount.toLocaleString('ru-RU')} ₽</TableCell>
-                      </TableRow>
-                    ))}
-                    {blockRecords.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={openBlock === 'management' ? 5 : 6} className="text-center text-slate-400 py-8">Нет записей</TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
+                      )}
+                      <TableCell>{op.legal_entity_name || '—'}</TableCell>
+                      <TableCell className="text-right font-mono">{op.amount.toLocaleString('ru-RU')} ₽</TableCell>
+                    </TableRow>
+                  ))}
+                  {blockRecords.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={openBlock === 'management' ? 6 : 7} className="text-center text-slate-400 py-8">Нет записей</TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -376,12 +368,14 @@ export default function Dashboard() {
         open={isFormOpen}
         onClose={() => { setIsFormOpen(false); setEditingOp(null); }}
         operation={editingOp}
-        projects={projects.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id }))}
+        projects={projects.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id, legal_entity_id: p.legal_entity_id }))}
         counterparties={counterparties}
+        legalEntities={legalEntities}
         categories={categories.map(c => ({ id: c.id, name: c.name, type: c.type }))}
         stages={stages.map(s => ({ id: s.id, name: s.name }))}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onLegalEntityCreated={handleLegalEntityCreated}
         onArchive={isAdmin && editingOp ? () => { handleArchive(editingOp.id); setIsFormOpen(false); setEditingOp(null); } : undefined}
       />
 

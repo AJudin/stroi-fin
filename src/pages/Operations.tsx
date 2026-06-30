@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { Operation, Counterparty } from '@/types';
+import type { Operation, Counterparty, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ import {
 import { Plus, Search, Download, Link2, ArrowUpDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'amount';
+type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'amount' | 'legal_entity_name';
 
 export default function Operations() {
   const [searchParams] = useSearchParams();
@@ -36,6 +36,8 @@ export default function Operations() {
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
+  const [legalEntityFilter, setLegalEntityFilter] = useState<string>('all');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; target: Operation | null; field: 'act_status' | 'payment_status' | null; nextStatus?: string }>({ open: false, target: null, field: null });
@@ -50,18 +52,20 @@ export default function Operations() {
   }, []);
 
   async function loadData() {
-    const [ops, projs, contrs, cats, sts] = await Promise.all([
+    const [ops, projs, contrs, cats, sts, les] = await Promise.all([
       pocketbaseService.getOperations(),
       pocketbaseService.getProjects(),
       pocketbaseService.getCounterparties(),
       pocketbaseService.getCategories(),
       pocketbaseService.getStages(),
+      pocketbaseService.getLegalEntities(),
     ]);
     setOperations(ops);
     setProjects(projs.map(p => ({ id: p.id, name: p.name, counterparty_id: p.counterparty_id })));
     setCounterparties(contrs);
     setCategories(cats.map(c => ({ id: c.id, name: c.name, type: c.type })));
     setStages(sts.map(s => ({ id: s.id, name: s.name })));
+    setLegalEntities(les);
   }
 
   const handleSort = (key: SortKey) => {
@@ -84,6 +88,7 @@ export default function Operations() {
       if (viewFilter !== 'all' && op.view !== viewFilter) return false;
       if (typeFilter !== 'all' && op.type !== typeFilter) return false;
       if (projectFilter !== 'all' && op.project_id !== projectFilter) return false;
+      if (legalEntityFilter !== 'all' && op.legal_entity_id !== legalEntityFilter) return false;
       return true;
     });
 
@@ -105,7 +110,7 @@ export default function Operations() {
     });
 
     return list;
-  }, [operations, searchQuery, viewFilter, typeFilter, projectFilter, sortConfig]);
+  }, [operations, searchQuery, viewFilter, typeFilter, projectFilter, legalEntityFilter, sortConfig]);
 
   const handleExport = () => {
     const data = filteredOps.map(op => ({
@@ -118,6 +123,7 @@ export default function Operations() {
       'Статья': op.category_name,
       'Этап': op.stage_name,
       'Сумма': op.amount,
+      'Моё ЮЛ': op.legal_entity_name || '',
       'Статус акта': op.act_status || '',
       'Статус оплаты': op.payment_status || '',
       'Комментарий': op.comment,
@@ -149,6 +155,10 @@ export default function Operations() {
 
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleLegalEntityCreated = (le: LegalEntity) => {
+    setLegalEntities(prev => [...prev, le]);
   };
 
   const viewColors: Record<string, string> = {
@@ -213,6 +223,13 @@ export default function Operations() {
               {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={legalEntityFilter} onValueChange={setLegalEntityFilter}>
+            <SelectTrigger className="w-52"><SelectValue placeholder="Моё ЮЛ" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все ЮЛ</SelectItem>
+              {legalEntities.map(le => <SelectItem key={le.id} value={le.id}>{le.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </Card>
 
@@ -230,6 +247,7 @@ export default function Operations() {
                   <SortableHeader keyName="counterparty_name">Контрагент</SortableHeader>
                   <SortableHeader keyName="category_name">Статья</SortableHeader>
                   <SortableHeader keyName="amount" className="text-right">Сумма</SortableHeader>
+                  <SortableHeader keyName="legal_entity_name">Моё ЮЛ</SortableHeader>
                   <TableHead>Статус</TableHead>
                 </TableRow>
               </TableHeader>
@@ -265,6 +283,7 @@ export default function Operations() {
                     <TableCell className={`text-right font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽
                     </TableCell>
+                    <TableCell className="text-sm">{op.legal_entity_name}</TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       {op.act_status && (
                         <Badge
@@ -295,7 +314,7 @@ export default function Operations() {
                 ))}
                 {filteredOps.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center text-slate-400 py-12">Нет операций</TableCell>
+                    <TableCell colSpan={9} className="text-center text-slate-400 py-12">Нет операций</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -314,8 +333,10 @@ export default function Operations() {
         counterparties={counterparties}
         categories={categories}
         stages={stages}
+        legalEntities={legalEntities}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onLegalEntityCreated={handleLegalEntityCreated}
         onArchive={isAdmin ? handleArchiveEditing : undefined}
       />
 

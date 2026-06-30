@@ -26,6 +26,15 @@ export interface Category {
   updated: string;
 }
 
+export interface LegalEntity {
+  id: string;
+  name: string;
+  inn: string;
+  is_archived: boolean;
+  created: string;
+  updated: string;
+}
+
 export interface Stage {
   id: string;
   name: string;
@@ -48,6 +57,8 @@ export interface Project {
   name: string;
   counterparty_id: string;
   counterparty_name?: string;
+  legal_entity_id?: string;
+  legal_entity_name?: string;
   start_date: string;
   end_date: string;
   contracts: Contract[];
@@ -71,6 +82,8 @@ export interface Operation {
   category_name?: string;
   stage_id: string;
   stage_name?: string;
+  legal_entity_id?: string;
+  legal_entity_name?: string;
   comment: string;
   amount: number;
   act_status: 'Подписан' | 'Не подписан' | null;

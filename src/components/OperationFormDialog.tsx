@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { Operation, Counterparty } from '@/types';
+import type { Operation, Counterparty, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,31 +8,35 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import CounterpartySelect from './CounterpartySelect';
+import LegalEntitySelect from './LegalEntitySelect';
 import { Archive, Copy } from 'lucide-react';
 
 interface OperationFormDialogProps {
   open: boolean;
   onClose: () => void;
   operation: Operation | null;
-  projects: { id: string; name: string; counterparty_id: string }[];
+  projects: { id: string; name: string; counterparty_id: string; legal_entity_id?: string }[];
   counterparties: Counterparty[];
+  legalEntities: LegalEntity[];
   categories: { id: string; name: string; type: string }[];
   stages: { id: string; name: string }[];
   onSaved: () => void;
   onCounterpartyCreated: (c: Counterparty) => void;
+  onLegalEntityCreated: (le: LegalEntity) => void;
   onArchive?: () => void;
 }
 
 const ALL_VIEWS = ['Управленческий учёт', 'Актирование', 'Касса'] as const;
 
 export default function OperationFormDialog({
-  open, onClose, operation, projects, counterparties, categories, stages, onSaved, onCounterpartyCreated, onArchive,
+  open, onClose, operation, projects, counterparties, legalEntities, categories, stages, onSaved, onCounterpartyCreated, onLegalEntityCreated, onArchive,
 }: OperationFormDialogProps) {
   const [projectId, setProjectId] = useState(operation?.project_id || '');
   const [date, setDate] = useState(operation?.date || new Date().toISOString().split('T')[0]);
   const [views, setViews] = useState<string[]>(operation ? [operation.view] : ['Управленческий учёт']);
   const [type, setType] = useState<'Приход' | 'Расход'>(operation?.type || 'Приход');
   const [counterpartyId, setCounterpartyId] = useState(operation?.counterparty_id || '');
+  const [legalEntityId, setLegalEntityId] = useState(operation?.legal_entity_id || '');
   const [categoryId, setCategoryId] = useState(operation?.category_id || '');
   const [stageId, setStageId] = useState(operation?.stage_id || '');
   const [amount, setAmount] = useState(operation?.amount?.toString() || '');
@@ -47,6 +51,7 @@ export default function OperationFormDialog({
   const [dupActStatus, setDupActStatus] = useState<'Подписан' | 'Не подписан'>('Не подписан');
   const [dupPaymentStatus, setDupPaymentStatus] = useState<'Оплачен' | 'Не оплачен'>('Не оплачен');
   const [existingViews, setExistingViews] = useState<string[]>(operation ? [operation.view] : []);
+  const [viewError, setViewError] = useState(false);
 
   const project = useMemo(() => projects.find(p => p.id === projectId), [projects, projectId]);
 
@@ -56,6 +61,13 @@ export default function OperationFormDialog({
       setCounterpartyId(project.counterparty_id);
     }
   }, [type, project]);
+
+  // Auto-select project's legal entity for acts/cash when empty
+  useEffect(() => {
+    if (project && !legalEntityId && views.some(v => v === 'Актирование' || v === 'Касса')) {
+      setLegalEntityId(project.legal_entity_id || '');
+    }
+  }, [project, views]);
 
   // Filter categories by operation type
   const availableCategories = useMemo(() =>
@@ -76,6 +88,7 @@ export default function OperationFormDialog({
       setViews(operation ? [operation.view] : ['Управленческий учёт']);
       setType(operation?.type || 'Приход');
       setCounterpartyId(operation?.counterparty_id || '');
+      setLegalEntityId(operation?.legal_entity_id || '');
       setCategoryId(operation?.category_id || '');
       setStageId(operation?.stage_id || '');
       setAmount(operation?.amount?.toString() || '');
@@ -106,11 +119,15 @@ export default function OperationFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
-    if (!numAmount || !projectId || !counterpartyId) return;
+    const needsLegalEntity = views.some(v => v === 'Актирование' || v === 'Касса');
+    const isValid = numAmount && projectId && counterpartyId && categoryId && stageId && views.length > 0 && (!needsLegalEntity || legalEntityId);
+    setViewError(views.length === 0);
+    if (!isValid) return;
 
     const baseData = {
       date, project_id: projectId, type,
       counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
+      legal_entity_id: needsLegalEntity ? legalEntityId : undefined,
       comment, amount: numAmount,
       is_archived: false,
     };
@@ -129,6 +146,7 @@ export default function OperationFormDialog({
         const updatePayload = {
           date, project_id: projectId, type,
           counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
+          legal_entity_id: operation.view === 'Актирование' || operation.view === 'Касса' ? legalEntityId : undefined,
           comment, amount: numAmount,
         };
         await Promise.all(
@@ -162,6 +180,7 @@ export default function OperationFormDialog({
     const baseData = {
       date, project_id: projectId, type,
       counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
+      legal_entity_id: legalEntityId,
       comment, amount: numAmount,
       is_archived: false,
     };
@@ -206,7 +225,7 @@ export default function OperationFormDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Проект</Label>
-                <Select value={projectId} onValueChange={setProjectId}>
+                <Select value={projectId} onValueChange={setProjectId} required>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
@@ -225,7 +244,7 @@ export default function OperationFormDialog({
                     variant={views.includes(v) ? 'default' : 'outline'}
                     size="sm"
                     className={views.includes(v) ? 'bg-emerald-600' : ''}
-                    onClick={() => setViews(views.includes(v) ? views.filter(x => x !== v) : [...views, v])}
+                    onClick={() => { setViews(views.includes(v) ? views.filter(x => x !== v) : [...views, v]); setViewError(false); }}
                     disabled={!!operation}
                   >
                     {v}
@@ -233,12 +252,13 @@ export default function OperationFormDialog({
                 ))}
               </div>
               {operation && <p className="text-xs text-slate-400">Вид нельзя изменить при редактировании</p>}
+              {viewError && <p className="text-xs text-red-500">Выберите хотя бы один вид операции</p>}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Тип</Label>
-                <Select value={type} onValueChange={(v) => setType(v as 'Приход' | 'Расход')}>
+                <Select value={type} onValueChange={(v) => setType(v as 'Приход' | 'Расход')} required>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Приход">Приход</SelectItem>
@@ -254,6 +274,7 @@ export default function OperationFormDialog({
                   counterparties={counterparties}
                   onCreated={onCounterpartyCreated}
                   preferredId={type === 'Приход' && project ? project.counterparty_id : undefined}
+                  required
                 />
               </div>
             </div>
@@ -261,7 +282,7 @@ export default function OperationFormDialog({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Статья</Label>
-                <Select value={categoryId} onValueChange={setCategoryId}>
+                <Select value={categoryId} onValueChange={setCategoryId} required>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {availableCategories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
@@ -270,7 +291,7 @@ export default function OperationFormDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Этап</Label>
-                <Select value={stageId} onValueChange={setStageId}>
+                <Select value={stageId} onValueChange={setStageId} required>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {stages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
@@ -278,6 +299,19 @@ export default function OperationFormDialog({
                 </Select>
               </div>
             </div>
+
+            {(views.includes('Актирование') || views.includes('Касса')) && (
+              <div className="space-y-1.5">
+                <Label>Моё юридическое лицо</Label>
+                <LegalEntitySelect
+                  value={legalEntityId}
+                  onChange={setLegalEntityId}
+                  legalEntities={legalEntities}
+                  onCreated={onLegalEntityCreated}
+                  required
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label>Сумма</Label>

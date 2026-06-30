@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { Project, Operation, Counterparty, Contract } from '@/types';
+import type { Project, Operation, Counterparty, Contract, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import CounterpartySelect from '@/components/CounterpartySelect';
+import LegalEntitySelect from '@/components/LegalEntitySelect';
 import { Plus, Trash2 } from 'lucide-react';
 
 export default function Projects() {
@@ -19,6 +20,7 @@ export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [operations, setOperations] = useState<Operation[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
 
@@ -30,14 +32,16 @@ export default function Projects() {
   }, []);
 
   async function loadData() {
-    const [prjs, ops, contrs] = await Promise.all([
+    const [prjs, ops, contrs, les] = await Promise.all([
       pocketbaseService.getProjects(),
       pocketbaseService.getOperations(),
       pocketbaseService.getCounterparties(),
+      pocketbaseService.getLegalEntities(),
     ]);
     setProjects(prjs);
     setOperations(ops);
     setCounterparties(contrs);
+    setLegalEntities(les);
   }
 
   const getProjectBalance = (projectId: string, view: string) => {
@@ -49,6 +53,10 @@ export default function Projects() {
 
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleLegalEntityCreated = (le: LegalEntity) => {
+    setLegalEntities(prev => [...prev, le]);
   };
 
   return (
@@ -70,6 +78,7 @@ export default function Projects() {
               <TableRow>
                 <TableHead>Проект</TableHead>
                 <TableHead>Заказчик</TableHead>
+                <TableHead>Моё ЮЛ</TableHead>
                 <TableHead className="text-right">Упр. учёт</TableHead>
                 <TableHead className="text-right">Актирование</TableHead>
                 <TableHead className="text-right">Касса</TableHead>
@@ -85,6 +94,7 @@ export default function Projects() {
                 >
                   <TableCell className="font-medium">{p.name}</TableCell>
                   <TableCell>{p.counterparty_name}</TableCell>
+                  <TableCell>{p.legal_entity_name || '—'}</TableCell>
                   <TableCell className={`text-right font-mono ${getProjectBalance(p.id, 'Управленческий учёт') >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                     {getProjectBalance(p.id, 'Управленческий учёт').toLocaleString('ru-RU')} ₽
                   </TableCell>
@@ -101,7 +111,7 @@ export default function Projects() {
               ))}
               {projects.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-slate-400 py-12">Нет проектов</TableCell>
+                  <TableCell colSpan={7} className="text-center text-slate-400 py-12">Нет проектов</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -114,22 +124,27 @@ export default function Projects() {
         onClose={() => { setIsFormOpen(false); setEditingProject(null); }}
         project={editingProject}
         counterparties={counterparties}
+        legalEntities={legalEntities}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onLegalEntityCreated={handleLegalEntityCreated}
       />
     </div>
   );
 }
 
-function ProjectFormDialog({ open, onClose, project, counterparties, onSaved, onCounterpartyCreated }:
+function ProjectFormDialog({ open, onClose, project, counterparties, legalEntities, onSaved, onCounterpartyCreated, onLegalEntityCreated }:
   {
     open: boolean; onClose: () => void; project: Project | null;
     counterparties: Counterparty[];
+    legalEntities: LegalEntity[];
     onSaved: () => void;
     onCounterpartyCreated: (c: Counterparty) => void;
+    onLegalEntityCreated: (le: LegalEntity) => void;
   }) {
   const [name, setName] = useState(project?.name || '');
   const [counterpartyId, setCounterpartyId] = useState(project?.counterparty_id || '');
+  const [legalEntityId, setLegalEntityId] = useState(project?.legal_entity_id || '');
   const [startDate, setStartDate] = useState(project?.start_date || '');
   const [endDate, setEndDate] = useState(project?.end_date || '');
   const [totalCost, setTotalCost] = useState(project?.total_cost?.toString() || '');
@@ -138,7 +153,7 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved, on
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const data = {
-      name, counterparty_id: counterpartyId,
+      name, counterparty_id: counterpartyId, legal_entity_id: legalEntityId,
       start_date: startDate, end_date: endDate,
       total_cost: parseFloat(totalCost) || 0,
       contracts,
@@ -183,6 +198,17 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved, on
               counterparties={counterparties}
               onCreated={onCounterpartyCreated}
               filterType="Заказчик"
+              required
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Моё юридическое лицо</Label>
+            <LegalEntitySelect
+              value={legalEntityId}
+              onChange={setLegalEntityId}
+              legalEntities={legalEntities}
+              onCreated={onLegalEntityCreated}
+              required
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -212,15 +238,15 @@ function ProjectFormDialog({ open, onClose, project, counterparties, onSaved, on
                 <div key={c.id} className="grid grid-cols-12 gap-2 items-end border rounded-lg p-3">
                   <div className="col-span-5 space-y-1.5">
                     <Label className="text-xs">№ договора</Label>
-                    <Input value={c.number} onChange={e => updateContract(idx, { number: e.target.value })} placeholder="№ договора" />
+                    <Input value={c.number} onChange={e => updateContract(idx, { number: e.target.value })} placeholder="№ договора" required />
                   </div>
                   <div className="col-span-3 space-y-1.5">
                     <Label className="text-xs">Сумма</Label>
-                    <Input type="number" value={c.amount || ''} onChange={e => updateContract(idx, { amount: parseFloat(e.target.value) || 0 })} placeholder="Сумма" />
+                    <Input type="number" value={c.amount || ''} onChange={e => updateContract(idx, { amount: parseFloat(e.target.value) || 0 })} placeholder="Сумма" required />
                   </div>
                   <div className="col-span-3 space-y-1.5">
                     <Label className="text-xs">Статус</Label>
-                    <Select value={c.status} onValueChange={(v) => updateContract(idx, { status: v as Contract['status'] })}>
+                    <Select value={c.status} onValueChange={(v) => updateContract(idx, { status: v as Contract['status'] })} required>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="Подписан">Подписан</SelectItem>

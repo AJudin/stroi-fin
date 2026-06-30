@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import type { Counterparty } from '@/types';
+import { useState } from 'react';
+import type { LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,55 +19,36 @@ import {
 } from '@/components/ui/select';
 import { Plus } from 'lucide-react';
 
-interface CounterpartySelectProps {
+interface LegalEntitySelectProps {
   value: string;
   onChange: (id: string) => void;
-  counterparties: Counterparty[];
-  onCreated: (counterparty: Counterparty) => void;
+  legalEntities: LegalEntity[];
+  onCreated: (legalEntity: LegalEntity) => void;
   placeholder?: string;
-  filterType?: Counterparty['type'];
-  preferredId?: string;
   required?: boolean;
 }
 
-export default function CounterpartySelect({
+export default function LegalEntitySelect({
   value,
   onChange,
-  counterparties,
+  legalEntities,
   onCreated,
-  placeholder = 'Контрагент',
-  filterType,
-  preferredId,
+  placeholder = 'Моё юридическое лицо',
   required,
-}: CounterpartySelectProps) {
+}: LegalEntitySelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState('');
   const [inn, setInn] = useState('');
-  const [type, setType] = useState<Counterparty['type']>('Заказчик');
   const [isSaving, setIsSaving] = useState(false);
-
-  const filtered = useMemo(() => {
-    let list = filterType
-      ? counterparties.filter(c => c.type === filterType)
-      : [...counterparties];
-    if (preferredId) {
-      const preferred = list.find(c => c.id === preferredId);
-      if (preferred) {
-        list = [preferred, ...list.filter(c => c.id !== preferredId)];
-      }
-    }
-    return list;
-  }, [counterparties, filterType, preferredId]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || !inn.trim()) return;
     setIsSaving(true);
     try {
-      const created = await pocketbaseService.createCounterparty({
+      const created = await pocketbaseService.createLegalEntity({
         name: name.trim(),
         inn: inn.trim(),
-        type,
         is_archived: false,
       });
       onCreated(created);
@@ -75,7 +56,6 @@ export default function CounterpartySelect({
       setIsOpen(false);
       setName('');
       setInn('');
-      setType('Заказчик');
     } finally {
       setIsSaving(false);
     }
@@ -88,9 +68,9 @@ export default function CounterpartySelect({
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
-          {filtered.map(c => (
-            <SelectItem key={c.id} value={c.id}>
-              {c.name} <span className="text-slate-400 text-xs">({c.type})</span>
+          {legalEntities.map(le => (
+            <SelectItem key={le.id} value={le.id}>
+              {le.name} <span className="text-slate-400 text-xs">({le.inn})</span>
             </SelectItem>
           ))}
         </SelectContent>
@@ -100,7 +80,7 @@ export default function CounterpartySelect({
         variant="outline"
         size="icon"
         onClick={() => setIsOpen(true)}
-        title="Новый контрагент"
+        title="Новое юридическое лицо"
       >
         <Plus className="w-4 h-4" />
       </Button>
@@ -108,7 +88,7 @@ export default function CounterpartySelect({
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Новый контрагент</DialogTitle>
+            <DialogTitle>Новое юридическое лицо</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleCreate} className="space-y-4 pt-2">
             <div className="space-y-1.5">
@@ -117,18 +97,7 @@ export default function CounterpartySelect({
             </div>
             <div className="space-y-1.5">
               <Label>ИНН</Label>
-              <Input value={inn} onChange={e => setInn(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Тип</Label>
-              <Select value={type} onValueChange={(v) => setType(v as Counterparty['type'])}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Заказчик">Заказчик</SelectItem>
-                  <SelectItem value="Поставщик">Поставщик</SelectItem>
-                  <SelectItem value="Подрядчик">Подрядчик</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input value={inn} onChange={e => setInn(e.target.value)} required />
             </div>
             <div className="flex gap-2 pt-2">
               <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700" disabled={isSaving}>

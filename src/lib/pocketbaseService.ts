@@ -1,5 +1,5 @@
 import type {
-  User, Counterparty, Category, Stage, Project, Operation, Planning, Contract
+  User, Counterparty, Category, Stage, Project, Operation, Planning, Contract, LegalEntity
 } from '@/types';
 import { pb } from './pocketbase';
 
@@ -68,6 +68,8 @@ function mapProject(r: Record<string, unknown>): Project {
     name: String(r.name),
     counterparty_id: String(r.counterparty_id),
     counterparty_name: expandName(r, 'counterparty_id'),
+    legal_entity_id: r.legal_entity_id ? String(r.legal_entity_id) : undefined,
+    legal_entity_name: expandName(r, 'legal_entity_id'),
     start_date: String(r.start_date),
     end_date: String(r.end_date),
     contracts: (r.contracts as Contract[]) || [],
@@ -94,6 +96,8 @@ function mapOperation(r: Record<string, unknown>): Operation {
     category_name: expandName(r, 'category_id'),
     stage_id: r.stage_id ? String(r.stage_id) : '',
     stage_name: expandName(r, 'stage_id'),
+    legal_entity_id: r.legal_entity_id ? String(r.legal_entity_id) : undefined,
+    legal_entity_name: expandName(r, 'legal_entity_id'),
     comment: String(r.comment || ''),
     amount: Number(r.amount),
     act_status: r.act_status as Operation['act_status'],
@@ -192,6 +196,56 @@ export const pocketbaseService = {
     return r ? mapCategory(r as Record<string, unknown>) : undefined;
   },
 
+  // Legal entities
+  getLegalEntities: async (): Promise<LegalEntity[]> => {
+    const res = await pb.collection('legal_entities').getFullList({
+      filter: 'is_archived = false',
+      sort: 'name',
+    });
+    return res.map(r => ({
+      id: String(r.id),
+      name: String(r.name),
+      inn: String(r.inn),
+      is_archived: Boolean(r.is_archived),
+      created: String(r.created),
+      updated: String(r.updated),
+    }) as LegalEntity);
+  },
+  getAllLegalEntities: async (): Promise<LegalEntity[]> => {
+    const res = await pb.collection('legal_entities').getFullList({ sort: 'name' });
+    return res.map(r => ({
+      id: String(r.id),
+      name: String(r.name),
+      inn: String(r.inn),
+      is_archived: Boolean(r.is_archived),
+      created: String(r.created),
+      updated: String(r.updated),
+    }) as LegalEntity);
+  },
+  createLegalEntity: async (data: Omit<LegalEntity, 'id' | 'created' | 'updated'>): Promise<LegalEntity> => {
+    const r = await pb.collection('legal_entities').create(data);
+    return {
+      id: String(r.id),
+      name: String(r.name),
+      inn: String(r.inn),
+      is_archived: Boolean(r.is_archived),
+      created: String(r.created),
+      updated: String(r.updated),
+    } as LegalEntity;
+  },
+  updateLegalEntity: async (id: string, data: Partial<LegalEntity>): Promise<LegalEntity | undefined> => {
+    const r = await pb.collection('legal_entities').update(id, data);
+    if (!r) return undefined;
+    return {
+      id: String(r.id),
+      name: String(r.name),
+      inn: String(r.inn),
+      is_archived: Boolean(r.is_archived),
+      created: String(r.created),
+      updated: String(r.updated),
+    } as LegalEntity;
+  },
+
   // Stages
   getStages: async (projectId?: string): Promise<Stage[]> => {
     const filterParts: string[] = [];
@@ -220,14 +274,14 @@ export const pocketbaseService = {
   // Projects
   getProjects: async (): Promise<Project[]> => {
     const res = await pb.collection('projects').getFullList({
-      expand: 'counterparty_id',
+      expand: 'counterparty_id,legal_entity_id',
       sort: '-start_date',
     });
     return res.map(mapProject);
   },
   getProject: async (id: string): Promise<Project | null> => {
     try {
-      const r = await pb.collection('projects').getOne(id, { expand: 'counterparty_id' });
+      const r = await pb.collection('projects').getOne(id, { expand: 'counterparty_id,legal_entity_id' });
       return mapProject(r as Record<string, unknown>);
     } catch { return null; }
   },
@@ -242,22 +296,23 @@ export const pocketbaseService = {
   },
 
   // Operations
-  getOperations: async (filters?: { project_id?: string; view?: string; type?: string; parent_id?: string | null }): Promise<Operation[]> => {
+  getOperations: async (filters?: { project_id?: string; view?: string; type?: string; parent_id?: string | null; legal_entity_id?: string }): Promise<Operation[]> => {
     const parts = ['is_archived = false'];
     if (filters?.project_id) parts.push(`project_id = "${filters.project_id}"`);
     if (filters?.view) parts.push(`view = "${filters.view}"`);
     if (filters?.type) parts.push(`type = "${filters.type}"`);
     if (filters?.parent_id) parts.push(`parent_id = "${filters.parent_id}"`);
+    if (filters?.legal_entity_id) parts.push(`legal_entity_id = "${filters.legal_entity_id}"`);
     const res = await pb.collection('operations').getFullList({
       filter: parts.join(' && '),
-      expand: 'project_id,counterparty_id,category_id,stage_id',
+      expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id',
       sort: '-date',
     });
     return res.map(mapOperation);
   },
   getOperation: async (id: string): Promise<Operation | null> => {
     try {
-      const r = await pb.collection('operations').getOne(id, { expand: 'project_id,counterparty_id,category_id,stage_id' });
+      const r = await pb.collection('operations').getOne(id, { expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id' });
       return mapOperation(r as Record<string, unknown>);
     } catch { return null; }
   },
@@ -268,6 +323,7 @@ export const pocketbaseService = {
     };
     if (!payload.category_id) delete payload.category_id;
     if (!payload.stage_id) delete payload.stage_id;
+    if (!payload.legal_entity_id) delete payload.legal_entity_id;
     if (!payload.parent_id) delete payload.parent_id;
     const r = await pb.collection('operations').create(payload);
     return mapOperation(r as Record<string, unknown>);
@@ -277,6 +333,7 @@ export const pocketbaseService = {
     if (data.date) payload.week = getWeekNumber(data.date);
     if (payload.category_id === '') delete payload.category_id;
     if (payload.stage_id === '') delete payload.stage_id;
+    if (payload.legal_entity_id === '') delete payload.legal_entity_id;
     if (payload.parent_id === '' || payload.parent_id === null) delete payload.parent_id;
     const r = await pb.collection('operations').update(id, payload);
     return r ? mapOperation(r as Record<string, unknown>) : undefined;

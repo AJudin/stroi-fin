@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import type { Project, Operation, Planning, Counterparty, Category, Stage, Contract } from '@/types';
+import type { Project, Operation, Planning, Counterparty, Category, Stage, Contract, LegalEntity } from '@/types';
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,7 @@ export default function ProjectDetail() {
   const [operations, setOperations] = useState<Operation[]>([]);
   const [planning, setPlanning] = useState<Planning[]>([]);
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
+  const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   void stages;
@@ -55,11 +56,12 @@ export default function ProjectDetail() {
 
   async function loadData() {
     if (!id) return;
-    const [prj, ops, plan, contrs, cats, sts] = await Promise.all([
+    const [prj, ops, plan, contrs, les, cats, sts] = await Promise.all([
       pocketbaseService.getProject(id),
       pocketbaseService.getOperations({ project_id: id }),
       pocketbaseService.getPlanning(id),
       pocketbaseService.getCounterparties(),
+      pocketbaseService.getLegalEntities(),
       pocketbaseService.getCategories(id),
       pocketbaseService.getStages(id),
     ]);
@@ -67,6 +69,7 @@ export default function ProjectDetail() {
     setOperations(ops);
     setPlanning(plan);
     setCounterparties(contrs);
+    setLegalEntities(les);
     setCategories(cats);
     setStages(sts);
   }
@@ -103,6 +106,10 @@ export default function ProjectDetail() {
 
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
+  };
+
+  const handleLegalEntityCreated = (le: LegalEntity) => {
+    setLegalEntities(prev => [...prev, le]);
   };
 
   const handleArchive = async (id: string) => {
@@ -248,10 +255,14 @@ export default function ProjectDetail() {
       {/* Project Info Card */}
       <Card>
         <CardContent className="p-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div>
               <p className="text-xs text-slate-500">Заказчик</p>
               <p className="font-medium">{project.counterparty_name}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Моё юридическое лицо</p>
+              <p className="font-medium">{project.legal_entity_name || '—'}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Сроки</p>
@@ -368,7 +379,7 @@ export default function ProjectDetail() {
                     >
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{op.comment}</p>
-                        <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')}</p>
+                        <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')} | {op.legal_entity_name || '—'}</p>
                       </div>
                       <div className="text-right ml-2">
                         <span className={`font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -425,7 +436,7 @@ export default function ProjectDetail() {
                     >
                       <div className="flex-1 min-w-0">
                         <p className="truncate">{op.category_name} | {op.comment}</p>
-                        <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')}</p>
+                        <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')} | {op.legal_entity_name || '—'}</p>
                       </div>
                       <div className="text-right ml-2">
                         <span className={`font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -565,12 +576,14 @@ export default function ProjectDetail() {
         open={isOpFormOpen}
         onClose={() => { setIsOpFormOpen(false); setEditingOp(null); }}
         operation={editingOp}
-        projects={project ? [{ id: project.id, name: project.name, counterparty_id: project.counterparty_id }] : []}
+        projects={project ? [{ id: project.id, name: project.name, counterparty_id: project.counterparty_id, legal_entity_id: project.legal_entity_id }] : []}
         counterparties={counterparties}
+        legalEntities={legalEntities}
         categories={categories}
         stages={stages}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
+        onLegalEntityCreated={handleLegalEntityCreated}
         onArchive={isAdmin && editingOp ? () => { handleArchive(editingOp.id); setIsOpFormOpen(false); setEditingOp(null); } : undefined}
       />
 
