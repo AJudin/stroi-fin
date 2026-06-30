@@ -13,9 +13,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Plus, Pencil, Archive, RotateCcw } from 'lucide-react';
 
+type Scope = 'global' | 'project';
+type GlobalSubTab = 'counterparties' | 'categories' | 'stages';
+type ProjectSubTab = 'categories' | 'stages';
+
 export default function References() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('counterparties');
+  const [activeTab, setActiveTab] = useState<Scope>('global');
+  const [globalSubTab, setGlobalSubTab] = useState<GlobalSubTab>('counterparties');
+  const [projectSubTab, setProjectSubTab] = useState<ProjectSubTab>('categories');
   const [counterparties, setCounterparties] = useState<Counterparty[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
@@ -57,6 +63,176 @@ export default function References() {
     await loadData();
   };
 
+  const openCreate = () => {
+    setEditingItem(null);
+    setIsFormOpen(true);
+  };
+
+  const openEdit = (item: any, type: 'counterparty' | 'category' | 'stage') => {
+    setEditingItem({ ...item, _type: type });
+    setIsFormOpen(true);
+  };
+
+  const currentFormScope = editingItem
+    ? (editingItem.project_id === undefined ? 'global' : (editingItem.project_id ? 'project' : 'global'))
+    : activeTab;
+
+  const CounterpartiesTable = () => (
+    <Card>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Название</TableHead>
+              <TableHead>ИНН</TableHead>
+              <TableHead>Тип</TableHead>
+              {isAdmin && <TableHead className="w-20"></TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {counterparties
+              .filter(c => c.is_archived === showArchived)
+              .map(item => (
+                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                  <TableCell className="font-medium">{item.name}</TableCell>
+                  <TableCell>{item.inn}</TableCell>
+                  <TableCell><Badge variant="outline">{item.type}</Badge></TableCell>
+                  {isAdmin && (
+                    <TableCell>
+                      {showArchived ? (
+                        <Button variant="ghost" size="icon" className="h-8 w-8"
+                          onClick={() => handleRestore(item.id, 'counterparties')}>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8"
+                            onClick={() => openEdit(item, 'counterparty')}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
+                            onClick={() => handleArchive(item.id, 'counterparties')}>
+                            <Archive className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            {counterparties.filter(c => c.is_archived === showArchived).length === 0 && (
+              <TableRow><TableCell colSpan={isAdmin ? 4 : 3} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+
+  const CategoriesTable = ({ scope }: { scope: Scope }) => {
+    const list = categories.filter(c => c.is_archived === showArchived && (scope === 'global' ? !c.project_id : !!c.project_id));
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Название</TableHead>
+                <TableHead>Тип</TableHead>
+                {scope === 'project' && <TableHead>Проект</TableHead>}
+                {isAdmin && <TableHead className="w-20"></TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map(item => (
+                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                  <TableCell className="font-medium">{item.name}</TableCell>
+                  <TableCell><Badge className={item.type === 'Приход' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>{item.type}</Badge></TableCell>
+                  {scope === 'project' && (
+                    <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
+                  )}
+                  {isAdmin && (
+                    <TableCell>
+                      {showArchived ? (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'categories')}>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item, 'category')}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'categories')}>
+                            <Archive className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+              {list.length === 0 && (
+                <TableRow><TableCell colSpan={isAdmin ? (scope === 'project' ? 4 : 3) : (scope === 'project' ? 3 : 2)} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
+
+  const StagesTable = ({ scope }: { scope: Scope }) => {
+    const list = stages.filter(s => s.is_archived === showArchived && (scope === 'global' ? !s.project_id : !!s.project_id));
+    return (
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Название</TableHead>
+                <TableHead>Порядок</TableHead>
+                {scope === 'project' && <TableHead>Проект</TableHead>}
+                {isAdmin && <TableHead className="w-20"></TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.sort((a, b) => a.order - b.order).map(item => (
+                <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
+                  <TableCell className="font-medium">{item.name}</TableCell>
+                  <TableCell>{item.order}</TableCell>
+                  {scope === 'project' && (
+                    <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
+                  )}
+                  {isAdmin && (
+                    <TableCell>
+                      {showArchived ? (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'stages')}>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </Button>
+                      ) : (
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item, 'stage')}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'stages')}>
+                            <Archive className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+              {list.length === 0 && (
+                <TableRow><TableCell colSpan={isAdmin ? (scope === 'project' ? 4 : 3) : (scope === 'project' ? 3 : 2)} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -66,169 +242,40 @@ export default function References() {
             <Button variant="outline" size="sm" onClick={() => setShowArchived(!showArchived)}>
               {showArchived ? 'Активные' : 'Архив'}
             </Button>
-            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => { setEditingItem(null); setIsFormOpen(true); }}>
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={openCreate}>
               <Plus className="w-4 h-4 mr-1" /> Добавить
             </Button>
           </div>
         )}
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Scope)}>
         <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="counterparties">Глобальные</TabsTrigger>
-          <TabsTrigger value="categories">Проектные</TabsTrigger>
+          <TabsTrigger value="global">Глобальные</TabsTrigger>
+          <TabsTrigger value="project">Проектные</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="counterparties" className="mt-4">
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Название</TableHead>
-                    <TableHead>ИНН</TableHead>
-                    <TableHead>Тип</TableHead>
-                    {isAdmin && <TableHead className="w-20"></TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {counterparties
-                    .filter(c => c.is_archived === showArchived)
-                    .map(item => (
-                      <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
-                        <TableCell className="font-medium">{item.name}</TableCell>
-                        <TableCell>{item.inn}</TableCell>
-                        <TableCell><Badge variant="outline">{item.type}</Badge></TableCell>
-                        {isAdmin && (
-                          <TableCell>
-                            {showArchived ? (
-                              <Button variant="ghost" size="icon" className="h-8 w-8"
-                                onClick={() => handleRestore(item.id, 'counterparties')}>
-                                <RotateCcw className="w-3.5 h-3.5" />
-                              </Button>
-                            ) : (
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" className="h-8 w-8"
-                                  onClick={() => { setEditingItem({ ...item, _type: 'counterparty' }); setIsFormOpen(true); }}>
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
-                                  onClick={() => handleArchive(item.id, 'counterparties')}>
-                                  <Archive className="w-3.5 h-3.5" />
-                                </Button>
-                              </div>
-                            )}
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                  {counterparties.filter(c => c.is_archived === showArchived).length === 0 && (
-                    <TableRow><TableCell colSpan={isAdmin ? 4 : 3} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+        <TabsContent value="global" className="mt-4 space-y-4">
+          <Tabs value={globalSubTab} onValueChange={(v) => setGlobalSubTab(v as GlobalSubTab)}>
+            <TabsList>
+              <TabsTrigger value="counterparties">Контрагенты</TabsTrigger>
+              <TabsTrigger value="categories">Статьи</TabsTrigger>
+              <TabsTrigger value="stages">Этапы</TabsTrigger>
+            </TabsList>
+            <TabsContent value="counterparties" className="mt-4"><CounterpartiesTable /></TabsContent>
+            <TabsContent value="categories" className="mt-4"><CategoriesTable scope="global" /></TabsContent>
+            <TabsContent value="stages" className="mt-4"><StagesTable scope="global" /></TabsContent>
+          </Tabs>
         </TabsContent>
 
-        <TabsContent value="categories" className="mt-4 space-y-4">
-          <Tabs defaultValue="categories">
+        <TabsContent value="project" className="mt-4 space-y-4">
+          <Tabs value={projectSubTab} onValueChange={(v) => setProjectSubTab(v as ProjectSubTab)}>
             <TabsList>
               <TabsTrigger value="categories">Статьи</TabsTrigger>
               <TabsTrigger value="stages">Этапы</TabsTrigger>
             </TabsList>
-            <TabsContent value="categories" className="mt-4">
-              <Card>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Название</TableHead>
-                        <TableHead>Тип</TableHead>
-                        <TableHead>Проект</TableHead>
-                        {isAdmin && <TableHead className="w-20"></TableHead>}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {categories.filter(c => c.is_archived === showArchived).map(item => (
-                        <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          <TableCell><Badge className={item.type === 'Приход' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>{item.type}</Badge></TableCell>
-                          <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
-                          {isAdmin && (
-                            <TableCell>
-                              {showArchived ? (
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'categories')}>
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </Button>
-                              ) : (
-                                <div className="flex gap-1">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingItem({ ...item, _type: 'category' }); setIsFormOpen(true); }}>
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'categories')}>
-                                    <Archive className="w-3.5 h-3.5" />
-                                  </Button>
-                                </div>
-                              )}
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      ))}
-                      {categories.filter(c => c.is_archived === showArchived).length === 0 && (
-                        <TableRow><TableCell colSpan={isAdmin ? 4 : 3} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </TabsContent>
-            <TabsContent value="stages" className="mt-4">
-              <Card>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Название</TableHead>
-                        <TableHead>Порядок</TableHead>
-                        <TableHead>Проект</TableHead>
-                        {isAdmin && <TableHead className="w-20"></TableHead>}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {stages.filter(s => s.is_archived === showArchived).sort((a, b) => a.order - b.order).map(item => (
-                        <TableRow key={item.id} className={item.is_archived ? 'opacity-50' : ''}>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          <TableCell>{item.order}</TableCell>
-                          <TableCell>{projects.find(p => p.id === item.project_id)?.name || item.project_id}</TableCell>
-                          {isAdmin && (
-                            <TableCell>
-                              {showArchived ? (
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleRestore(item.id, 'stages')}>
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                </Button>
-                              ) : (
-                                <div className="flex gap-1">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingItem({ ...item, _type: 'stage' }); setIsFormOpen(true); }}>
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleArchive(item.id, 'stages')}>
-                                    <Archive className="w-3.5 h-3.5" />
-                                  </Button>
-                                </div>
-                              )}
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      ))}
-                      {stages.filter(s => s.is_archived === showArchived).length === 0 && (
-                        <TableRow><TableCell colSpan={isAdmin ? 4 : 3} className="text-center text-slate-400 py-8">Нет записей</TableCell></TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </TabsContent>
+            <TabsContent value="categories" className="mt-4"><CategoriesTable scope="project" /></TabsContent>
+            <TabsContent value="stages" className="mt-4"><StagesTable scope="project" /></TabsContent>
           </Tabs>
         </TabsContent>
       </Tabs>
@@ -237,7 +284,7 @@ export default function References() {
         open={isFormOpen}
         onClose={() => { setIsFormOpen(false); setEditingItem(null); }}
         item={editingItem}
-        activeTab={activeTab}
+        scope={currentFormScope}
         projects={projects}
         onSaved={loadData}
       />
@@ -245,18 +292,32 @@ export default function References() {
   );
 }
 
-function ReferenceFormDialog({ open, onClose, item, activeTab, projects, onSaved }:
+function ReferenceFormDialog({ open, onClose, item, scope, projects, onSaved }:
   {
     open: boolean; onClose: () => void; item: any;
-    activeTab: string; projects: Project[]; onSaved: () => void;
+    scope: Scope; projects: Project[]; onSaved: () => void;
   }) {
-  const [formType, setFormType] = useState(item?._type || (activeTab === 'counterparties' ? 'counterparty' : 'category'));
+  const determineFormType = () => {
+    if (item?._type) return item._type;
+    return 'counterparty';
+  };
+  const [formType, setFormType] = useState(determineFormType());
   const [name, setName] = useState(item?.name || '');
   const [inn, setInn] = useState(item?.inn || '');
   const [type, setType] = useState(item?.type || 'Заказчик');
   const [categoryType, setCategoryType] = useState(item?.type || 'Расход');
-  const [projectId, setProjectId] = useState(item?.project_id || '');
+  const [projectId, setProjectId] = useState<string>(item?.project_id || '');
   const [order, setOrder] = useState(item?.order?.toString() || '1');
+
+  useEffect(() => {
+    setFormType(determineFormType());
+    setName(item?.name || '');
+    setInn(item?.inn || '');
+    setType(item?.type || 'Заказчик');
+    setCategoryType(item?.type || 'Расход');
+    setProjectId(item?.project_id || '');
+    setOrder(item?.order?.toString() || '1');
+  }, [item]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,15 +325,25 @@ function ReferenceFormDialog({ open, onClose, item, activeTab, projects, onSaved
       if (item) await pocketbaseService.updateCounterparty(item.id, { name, inn, type });
       else await pocketbaseService.createCounterparty({ name, inn, type, is_archived: false });
     } else if (formType === 'category') {
-      if (item) await pocketbaseService.updateCategory(item.id, { name, type: categoryType, project_id: projectId });
-      else await pocketbaseService.createCategory({ name, type: categoryType, project_id: projectId, is_archived: false });
+      const payload: Partial<Category> & { name: string; type: Category['type']; is_archived: boolean; project_id?: string } = {
+        name, type: categoryType, is_archived: false,
+      };
+      if (projectId) payload.project_id = projectId;
+      if (item) await pocketbaseService.updateCategory(item.id, payload);
+      else await pocketbaseService.createCategory(payload as Omit<Category, 'id' | 'created' | 'updated'>);
     } else if (formType === 'stage') {
-      if (item) await pocketbaseService.updateStage(item.id, { name, order: parseInt(order), project_id: projectId });
-      else await pocketbaseService.createStage({ name, order: parseInt(order), project_id: projectId, is_archived: false });
+      const payload: Partial<Stage> & { name: string; order: number; is_archived: boolean; project_id?: string } = {
+        name, order: parseInt(order), is_archived: false,
+      };
+      if (projectId) payload.project_id = projectId;
+      if (item) await pocketbaseService.updateStage(item.id, payload);
+      else await pocketbaseService.createStage(payload as Omit<Stage, 'id' | 'created' | 'updated'>);
     }
     onSaved();
     onClose();
   };
+
+  const isGlobalScope = scope === 'global';
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -337,6 +408,7 @@ function ReferenceFormDialog({ open, onClose, item, activeTab, projects, onSaved
                 <Select value={projectId} onValueChange={setProjectId}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    {isGlobalScope && <SelectItem value="">Глобальная</SelectItem>}
                     {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -355,6 +427,7 @@ function ReferenceFormDialog({ open, onClose, item, activeTab, projects, onSaved
                 <Select value={projectId} onValueChange={setProjectId}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    {isGlobalScope && <SelectItem value="">Глобальная</SelectItem>}
                     {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                   </SelectContent>
                 </Select>

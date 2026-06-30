@@ -80,7 +80,7 @@ export default function Dashboard() {
   const [showRecords, setShowRecords] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract' | 'op_act' | 'op_payment'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
 
   async function loadData() {
     const [ops, prjs, contrs, cats, sts] = await Promise.all([
@@ -115,6 +115,12 @@ export default function Dashboard() {
     if (confirmStatus.type === 'act') {
       const act = confirmStatus.target as Operation;
       await pocketbaseService.updateOperation(act.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || act.act_status });
+    } else if (confirmStatus.type === 'op_act') {
+      const op = confirmStatus.target as Operation;
+      await pocketbaseService.updateOperation(op.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || op.act_status });
+    } else if (confirmStatus.type === 'op_payment') {
+      const op = confirmStatus.target as Operation;
+      await pocketbaseService.updateOperation(op.id, { payment_status: (confirmStatus.nextStatus as Operation['payment_status']) || op.payment_status });
     } else if (confirmStatus.type === 'contract' && confirmStatus.project) {
       const contract = confirmStatus.target as Contract;
       const next: Contract = { ...contract, status: (confirmStatus.nextStatus as Contract['status']) || contract.status };
@@ -321,15 +327,29 @@ export default function Dashboard() {
                         </TableCell>
                         {openBlock !== 'management' && (
                           <TableCell>
-                            {op.act_status && (
-                              <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
-                                className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
+                            {op.act_status && openBlock === 'acts' && (
+                              <Badge
+                                variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                                className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  const next = op.act_status === 'Подписан' ? 'Не подписан' : 'Подписан';
+                                  setConfirmStatus({ open: true, type: 'op_act', target: op, nextStatus: next });
+                                }}
+                              >
                                 {op.act_status}
                               </Badge>
                             )}
-                            {op.payment_status && (
-                              <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                                className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'}>
+                            {op.payment_status && openBlock === 'cash' && (
+                              <Badge
+                                variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                                className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  const next = op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен';
+                                  setConfirmStatus({ open: true, type: 'op_payment', target: op, nextStatus: next });
+                                }}
+                              >
                                 {op.payment_status}
                               </Badge>
                             )}
@@ -454,8 +474,11 @@ export default function Dashboard() {
           <AlertDialogHeader>
             <AlertDialogTitle>Подтвердите изменение статуса</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmStatus.type === 'act' && confirmStatus.target && (
+              {(confirmStatus.type === 'act' || confirmStatus.type === 'op_act') && confirmStatus.target && (
                 <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>
+              )}
+              {confirmStatus.type === 'op_payment' && confirmStatus.target && (
+                <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>
               )}
               {confirmStatus.type === 'contract' && confirmStatus.target && (
                 <>Изменить статус договора «{(confirmStatus.target as Contract).number || '—'}» на «{confirmStatus.nextStatus}»?</>

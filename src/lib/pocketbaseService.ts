@@ -43,7 +43,7 @@ function mapCategory(r: Record<string, unknown>): Category {
     id: String(r.id),
     name: String(r.name),
     type: r.type as Category['type'],
-    project_id: String(r.project_id),
+    project_id: r.project_id ? String(r.project_id) : undefined,
     is_archived: Boolean(r.is_archived),
     created: String(r.created),
     updated: String(r.updated),
@@ -55,7 +55,7 @@ function mapStage(r: Record<string, unknown>): Stage {
     id: String(r.id),
     name: String(r.name),
     order: Number(r.order),
-    project_id: String(r.project_id),
+    project_id: r.project_id ? String(r.project_id) : undefined,
     is_archived: Boolean(r.is_archived),
     created: String(r.created),
     updated: String(r.updated),
@@ -170,7 +170,9 @@ export const pocketbaseService = {
   // Categories
   getCategories: async (projectId?: string): Promise<Category[]> => {
     const filterParts = ['is_archived = false'];
-    if (projectId) filterParts.push(`project_id = "${projectId}"`);
+    if (projectId) {
+      filterParts.push(`(project_id = "" || project_id = "${projectId}")`);
+    }
     const res = await pb.collection('categories').getFullList({
       filter: filterParts.join(' && '),
       sort: 'name',
@@ -192,9 +194,14 @@ export const pocketbaseService = {
 
   // Stages
   getStages: async (projectId?: string): Promise<Stage[]> => {
-    let filter = '';
-    if (projectId) filter = `project_id = "${projectId}"`;
-    const res = await pb.collection('stages').getFullList({ filter, sort: 'order' });
+    const filterParts: string[] = [];
+    if (projectId) {
+      filterParts.push(`(project_id = "" || project_id = "${projectId}")`);
+    }
+    const res = await pb.collection('stages').getFullList({
+      filter: filterParts.join(' && ') || undefined,
+      sort: 'order',
+    });
     return res.map(mapStage);
   },
   getAllStages: async (): Promise<Stage[]> => {

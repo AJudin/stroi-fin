@@ -11,7 +11,17 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, Search, Download, Pencil, Archive, Link2, ArrowUpDown } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Plus, Search, Download, Link2, ArrowUpDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 type SortKey = 'date' | 'project_name' | 'view' | 'type' | 'counterparty_name' | 'category_name' | 'amount';
@@ -28,6 +38,7 @@ export default function Operations() {
   const [stages, setStages] = useState<{ id: string; name: string }[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; target: Operation | null; field: 'act_status' | 'payment_status' | null; nextStatus?: string }>({ open: false, target: null, field: null });
   const [searchQuery, setSearchQuery] = useState('');
   const [viewFilter, setViewFilter] = useState<string>(searchParams.get('view') || 'all');
   const [typeFilter, setTypeFilter] = useState<string>(searchParams.get('type') || 'all');
@@ -129,6 +140,13 @@ export default function Operations() {
     setEditingOp(null);
   };
 
+  const handleConfirmStatus = async () => {
+    if (!confirmStatus.target || !confirmStatus.field || !confirmStatus.nextStatus) return;
+    await pocketbaseService.updateOperation(confirmStatus.target.id, { [confirmStatus.field]: confirmStatus.nextStatus });
+    setConfirmStatus({ open: false, target: null, field: null });
+    await loadData();
+  };
+
   const handleCounterpartyCreated = (c: Counterparty) => {
     setCounterparties(prev => [...prev, c]);
   };
@@ -213,12 +231,15 @@ export default function Operations() {
                   <SortableHeader keyName="category_name">Статья</SortableHeader>
                   <SortableHeader keyName="amount" className="text-right">Сумма</SortableHeader>
                   <TableHead>Статус</TableHead>
-                  <TableHead className="w-20"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredOps.map(op => (
-                  <TableRow key={op.id} className="hover:bg-slate-50">
+                  <TableRow
+                    key={op.id}
+                    className="hover:bg-slate-50 cursor-pointer"
+                    onClick={() => { setEditingOp(op); setIsFormOpen(true); }}
+                  >
                     <TableCell className="text-sm">{new Date(op.date).toLocaleDateString('ru-RU')}</TableCell>
                     <TableCell className="text-sm font-medium max-w-[180px] truncate">{op.project_name}</TableCell>
                     <TableCell>
@@ -244,41 +265,37 @@ export default function Operations() {
                     <TableCell className={`text-right font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
                       {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
                       {op.act_status && (
-                        <Badge variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
-                          className={op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'}>
+                        <Badge
+                          variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
+                          className={`${op.act_status === 'Подписан' ? 'bg-emerald-500 text-xs' : 'text-xs'} cursor-pointer`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmStatus({ open: true, target: op, field: 'act_status', nextStatus: op.act_status === 'Подписан' ? 'Не подписан' : 'Подписан' });
+                          }}
+                        >
                           {op.act_status}
                         </Badge>
                       )}
                       {op.payment_status && (
-                        <Badge variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                          className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'}>
+                        <Badge
+                          variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
+                          className={`${op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'} cursor-pointer`}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmStatus({ open: true, target: op, field: 'payment_status', nextStatus: op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен' });
+                          }}
+                        >
                           {op.payment_status}
                         </Badge>
                       )}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        {(isAdmin || isOperator) && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8"
-                            onClick={() => { setEditingOp(op); setIsFormOpen(true); }}>
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                        {isAdmin && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"
-                            onClick={() => handleArchive(op.id)}>
-                            <Archive className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
                 {filteredOps.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-slate-400 py-12">Нет операций</TableCell>
+                    <TableCell colSpan={8} className="text-center text-slate-400 py-12">Нет операций</TableCell>
                   </TableRow>
                 )}
               </TableBody>
@@ -301,6 +318,22 @@ export default function Operations() {
         onCounterpartyCreated={handleCounterpartyCreated}
         onArchive={isAdmin ? handleArchiveEditing : undefined}
       />
+
+      <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, target: null, field: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Подтвердите изменение статуса</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmStatus.field === 'act_status' && <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>}
+              {confirmStatus.field === 'payment_status' && <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setConfirmStatus({ open: false, target: null, field: null })}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmStatus} className="bg-emerald-600 hover:bg-emerald-700">Подтвердить</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

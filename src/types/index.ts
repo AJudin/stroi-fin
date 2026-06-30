@@ -20,7 +20,7 @@ export interface Category {
   id: string;
   name: string;
   type: 'Приход' | 'Расход';
-  project_id: string;
+  project_id?: string;
   is_archived: boolean;
   created: string;
   updated: string;
@@ -30,7 +30,7 @@ export interface Stage {
   id: string;
   name: string;
   order: number;
-  project_id: string;
+  project_id?: string;
   is_archived: boolean;
   created: string;
   updated: string;
