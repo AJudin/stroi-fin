@@ -87,7 +87,8 @@ export interface Operation {
   comment: string;
   amount: number;
   act_status: 'Подписан' | 'Не подписан' | null;
-  payment_status: 'Оплачен' | 'Не оплачен' | null;
+  payment_status: 'Оплачен' | 'Не оплачен' | 'Частично оплачен' | null;
+  paid_amount: number;
   is_archived: boolean;
   parent_id: string | null;
   created: string;
@@ -125,6 +126,7 @@ export interface KPIData {
   acts_signed: number;
   acts_gross: number;
   cash_paid: number;
+  cash_partial: number;
   cash_gross: number;
 }
 

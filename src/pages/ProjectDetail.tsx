@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import OperationFormDialog from '@/components/OperationFormDialog';
+import PaymentStatusDialog from '@/components/PaymentStatusDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +44,8 @@ export default function ProjectDetail() {
   const [isPlanFormOpen, setIsPlanFormOpen] = useState(false);
   const [importReport, setImportReport] = useState<{ imported: number; errors: { row: number; message: string }[] } | null>(null);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
-  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'payment' | 'contract'; target: Operation | Contract | null; projectId?: string; nextStatus?: string }>({ open: false, type: 'act', target: null });
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract'; target: Operation | Contract | null; projectId?: string; nextStatus?: string }>({ open: false, type: 'act', target: null });
+  const [paymentDialogOp, setPaymentDialogOp] = useState<Operation | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = user?.role === 'admin';
@@ -89,7 +91,12 @@ export default function ProjectDetail() {
       acts: signed(projectOps.acts),
       actsUnsigned: projectOps.acts.filter(o => o.act_status === 'Не подписан').reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
       cash: signed(projectOps.cash),
-      cashUnpaid: projectOps.cash.filter(o => o.payment_status === 'Не оплачен').reduce((s, o) => s + (o.type === 'Приход' ? o.amount : -o.amount), 0),
+      cashUnpaid: projectOps.cash.reduce((s, o) => {
+        let unpaid = 0;
+        if (o.payment_status === 'Не оплачен') unpaid = o.amount;
+        else if (o.payment_status === 'Частично оплачен') unpaid = o.amount - o.paid_amount;
+        return s + (o.type === 'Приход' ? unpaid : -unpaid);
+      }, 0),
       planning: planning.reduce((s, p) => s + (p.type === 'Приход' ? p.amount : -p.amount), 0),
     };
   }, [projectOps, planning]);
@@ -128,9 +135,6 @@ export default function ProjectDetail() {
     } else if (confirmStatus.type === 'act') {
       const op = confirmStatus.target as Operation;
       await pocketbaseService.updateOperation(op.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || op.act_status });
-    } else if (confirmStatus.type === 'payment') {
-      const op = confirmStatus.target as Operation;
-      await pocketbaseService.updateOperation(op.id, { payment_status: (confirmStatus.nextStatus as Operation['payment_status']) || op.payment_status });
     }
     setConfirmStatus({ open: false, type: 'act', target: null });
     await loadData();
@@ -382,9 +386,14 @@ export default function ProjectDetail() {
                         <p className="text-xs text-slate-400">{new Date(op.date).toLocaleDateString('ru-RU')} | {op.legal_entity_name || '—'}</p>
                       </div>
                       <div className="text-right ml-2">
-                        <span className={`font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
+                        <div className={`font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
                           {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')}
-                        </span>
+                        </div>
+                        {op.payment_status === 'Частично оплачен' && (
+                          <div className="text-[9px] text-orange-500 leading-none">
+                            опл. {op.paid_amount.toLocaleString('ru-RU')}
+                          </div>
+                        )}
                         {op.act_status && (
                           <Badge
                             variant={op.act_status === 'Подписан' ? 'default' : 'destructive'}
@@ -444,14 +453,14 @@ export default function ProjectDetail() {
                         </span>
                         {op.payment_status && (
                           <Badge
-                            variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                            className={`text-[10px] ml-1 cursor-pointer ${op.payment_status === 'Оплачен' ? 'bg-emerald-500' : ''}`}
+                            variant={op.payment_status === 'Оплачен' ? 'default' : op.payment_status === 'Частично оплачен' ? 'secondary' : 'destructive'}
+                            className={`text-[10px] ml-1 cursor-pointer ${
+                              op.payment_status === 'Оплачен' ? 'bg-emerald-500' :
+                              op.payment_status === 'Частично оплачен' ? 'bg-amber-500 text-white' : ''
+                            }`}
                             onClick={e => {
                               e.stopPropagation();
-                              setConfirmStatus({
-                                open: true, type: 'payment', target: op,
-                                nextStatus: op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен',
-                              });
+                              setPaymentDialogOp(op);
                             }}
                           >
                             {op.payment_status}
@@ -587,6 +596,13 @@ export default function ProjectDetail() {
         onArchive={isAdmin && editingOp ? () => { handleArchive(editingOp.id); setIsOpFormOpen(false); setEditingOp(null); } : undefined}
       />
 
+      <PaymentStatusDialog
+        operation={paymentDialogOp}
+        open={!!paymentDialogOp}
+        onClose={() => setPaymentDialogOp(null)}
+        onSaved={loadData}
+      />
+
       {/* Status Change Confirmation */}
       <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, type: 'act', target: null })}>
         <AlertDialogContent>
@@ -599,9 +615,7 @@ export default function ProjectDetail() {
               {confirmStatus.type === 'act' && confirmStatus.target && (
                 <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>
               )}
-              {confirmStatus.type === 'payment' && confirmStatus.target && (
-                <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>
-              )}
+
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -42,14 +42,16 @@ export default function OperationFormDialog({
   const [amount, setAmount] = useState(operation?.amount?.toString() || '');
   const [comment, setComment] = useState(operation?.comment || '');
   const [actStatus, setActStatus] = useState<'Подписан' | 'Не подписан'>(operation?.act_status as 'Подписан' | 'Не подписан' || 'Не подписан');
-  const [paymentStatus, setPaymentStatus] = useState<'Оплачен' | 'Не оплачен'>(operation?.payment_status as 'Оплачен' | 'Не оплачен' || 'Не оплачен');
+  const [paymentStatus, setPaymentStatus] = useState<NonNullable<Operation['payment_status']>>(operation?.payment_status as NonNullable<Operation['payment_status']> || 'Не оплачен');
+  const [paidAmount, setPaidAmount] = useState(operation?.paid_amount?.toString() || '');
   const [updateLinked, setUpdateLinked] = useState(false);
 
   // Duplicate dialog state
   const [isDuplicateOpen, setIsDuplicateOpen] = useState(false);
   const [duplicateViews, setDuplicateViews] = useState<string[]>([]);
   const [dupActStatus, setDupActStatus] = useState<'Подписан' | 'Не подписан'>('Не подписан');
-  const [dupPaymentStatus, setDupPaymentStatus] = useState<'Оплачен' | 'Не оплачен'>('Не оплачен');
+  const [dupPaymentStatus, setDupPaymentStatus] = useState<NonNullable<Operation['payment_status']>>('Не оплачен');
+  const [dupPaidAmount, setDupPaidAmount] = useState('');
   const [existingViews, setExistingViews] = useState<string[]>(operation ? [operation.view] : []);
   const [viewError, setViewError] = useState(false);
 
@@ -95,11 +97,13 @@ export default function OperationFormDialog({
       setAmount(operation?.amount?.toString() || '');
       setComment(operation?.comment || '');
       setActStatus(operation?.act_status as 'Подписан' | 'Не подписан' || 'Не подписан');
-      setPaymentStatus(operation?.payment_status as 'Оплачен' | 'Не оплачен' || 'Не оплачен');
+      setPaymentStatus(operation?.payment_status as NonNullable<Operation['payment_status']> || 'Не оплачен');
+      setPaidAmount(operation?.paid_amount?.toString() || '');
       setUpdateLinked(false);
       setDuplicateViews([]);
       setDupActStatus('Не подписан');
       setDupPaymentStatus('Не оплачен');
+      setDupPaidAmount('');
       setExistingViews(operation ? [operation.view] : []);
     }
   }, [open, operation]);
@@ -124,6 +128,9 @@ export default function OperationFormDialog({
     setViewError(views.length === 0);
     if (!isValid) return;
 
+    const paidAmountValue = paymentStatus === 'Частично оплачен' ? parseFloat(paidAmount) : undefined;
+    if (views.includes('Касса') && paymentStatus === 'Частично оплачен' && (isNaN(paidAmountValue!) || paidAmountValue! <= 0 || paidAmountValue! > numAmount)) return;
+
     const baseData = {
       date, project_id: projectId, type,
       counterparty_id: counterpartyId, category_id: categoryId, stage_id: stageId,
@@ -133,12 +140,17 @@ export default function OperationFormDialog({
     };
 
     if (operation) {
-      const data = {
+      const data: any = {
         ...baseData,
         view: operation.view,
         act_status: operation.view === 'Актирование' ? actStatus : null,
         payment_status: operation.view === 'Касса' ? paymentStatus : null,
       };
+      if (operation.view === 'Касса') {
+        if (paymentStatus === 'Оплачен') data.paid_amount = numAmount;
+        else if (paymentStatus === 'Не оплачен') data.paid_amount = 0;
+        else if (paymentStatus === 'Частично оплачен') data.paid_amount = paidAmountValue;
+      }
       await pocketbaseService.updateOperation(operation.id, data);
 
       if (updateLinked && operation.parent_id) {
@@ -158,13 +170,18 @@ export default function OperationFormDialog({
     } else {
       const groupId = views.length > 1 ? `group_${Date.now()}` : null;
       for (const view of views) {
-        const data = {
+        const data: any = {
           ...baseData,
           view: view as Operation['view'],
           act_status: view === 'Актирование' ? actStatus : null,
           payment_status: view === 'Касса' ? paymentStatus : null,
           parent_id: groupId,
         };
+        if (view === 'Касса') {
+          if (paymentStatus === 'Оплачен') data.paid_amount = numAmount;
+          else if (paymentStatus === 'Не оплачен') data.paid_amount = 0;
+          else if (paymentStatus === 'Частично оплачен') data.paid_amount = paidAmountValue;
+        }
         await pocketbaseService.createOperation(data);
       }
     }
@@ -192,14 +209,22 @@ export default function OperationFormDialog({
       await pocketbaseService.updateOperation(operation.id, { parent_id: groupId });
     }
 
+    const dupPaidAmountValue = dupPaymentStatus === 'Частично оплачен' ? parseFloat(dupPaidAmount) : undefined;
+    if (duplicateViews.includes('Касса') && dupPaymentStatus === 'Частично оплачен' && (isNaN(dupPaidAmountValue!) || dupPaidAmountValue! <= 0 || dupPaidAmountValue! > numAmount)) return;
+
     for (const view of duplicateViews) {
-      const data = {
+      const data: any = {
         ...baseData,
         view: view as Operation['view'],
         act_status: view === 'Актирование' ? dupActStatus : null,
         payment_status: view === 'Касса' ? dupPaymentStatus : null,
         parent_id: groupId,
       };
+      if (view === 'Касса') {
+        if (dupPaymentStatus === 'Оплачен') data.paid_amount = numAmount;
+        else if (dupPaymentStatus === 'Не оплачен') data.paid_amount = 0;
+        else if (dupPaymentStatus === 'Частично оплачен') data.paid_amount = dupPaidAmountValue;
+      }
       await pocketbaseService.createOperation(data);
     }
 
@@ -330,16 +355,25 @@ export default function OperationFormDialog({
             )}
 
             {views.includes('Касса') && (
-              <div className="space-y-1.5">
-                <Label>Статус оплаты</Label>
-                <Select value={paymentStatus} onValueChange={(v) => setPaymentStatus(v as 'Оплачен' | 'Не оплачен')}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Оплачен">Оплачен</SelectItem>
-                    <SelectItem value="Не оплачен">Не оплачен</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <>
+                <div className="space-y-1.5">
+                  <Label>Статус оплаты</Label>
+                  <Select value={paymentStatus} onValueChange={(v) => setPaymentStatus(v as NonNullable<Operation['payment_status']>)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Оплачен">Оплачен</SelectItem>
+                      <SelectItem value="Не оплачен">Не оплачен</SelectItem>
+                      <SelectItem value="Частично оплачен">Частично оплачен</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {paymentStatus === 'Частично оплачен' && (
+                  <div className="space-y-1.5">
+                    <Label>Оплаченная сумма</Label>
+                    <Input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} required />
+                  </div>
+                )}
+              </>
             )}
 
             <div className="space-y-1.5">
@@ -432,16 +466,25 @@ export default function OperationFormDialog({
                 )}
 
                 {duplicateViews.includes('Касса') && (
-                  <div className="space-y-1.5">
-                    <Label>Статус оплаты для дублей</Label>
-                    <Select value={dupPaymentStatus} onValueChange={(v) => setDupPaymentStatus(v as 'Оплачен' | 'Не оплачен')}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Оплачен">Оплачен</SelectItem>
-                        <SelectItem value="Не оплачен">Не оплачен</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <>
+                    <div className="space-y-1.5">
+                      <Label>Статус оплаты для дублей</Label>
+                      <Select value={dupPaymentStatus} onValueChange={(v) => setDupPaymentStatus(v as NonNullable<Operation['payment_status']>)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Оплачен">Оплачен</SelectItem>
+                          <SelectItem value="Не оплачен">Не оплачен</SelectItem>
+                          <SelectItem value="Частично оплачен">Частично оплачен</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {dupPaymentStatus === 'Частично оплачен' && (
+                      <div className="space-y-1.5">
+                        <Label>Оплаченная сумма для дублей</Label>
+                        <Input type="number" value={dupPaidAmount} onChange={e => setDupPaidAmount(e.target.value)} required />
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}

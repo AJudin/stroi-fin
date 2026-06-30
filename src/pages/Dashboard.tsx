@@ -4,6 +4,7 @@ import type { Operation, Project, Counterparty, Category, Stage, Contract, Legal
 import { pocketbaseService } from '@/lib/pocketbaseService';
 import { useAuth } from '@/context/AuthContext';
 import OperationFormDialog from '@/components/OperationFormDialog';
+import PaymentStatusDialog from '@/components/PaymentStatusDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,13 +29,15 @@ interface KPICardProps {
   primaryValue: number;
   secondaryValue?: number;
   secondaryLabel?: string;
+  extraValue?: number;
+  extraLabel?: string;
   color: string;
   icon: React.ReactNode;
   isOpen: boolean;
   onToggle: () => void;
 }
 
-function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, icon, isOpen, onToggle }: KPICardProps) {
+function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, extraValue, extraLabel, color, icon, isOpen, onToggle }: KPICardProps) {
   const isPositive = primaryValue >= 0;
   return (
     <Card
@@ -51,6 +54,11 @@ function KPICard({ title, primaryValue, secondaryValue, secondaryLabel, color, i
             {secondaryValue !== undefined && (
               <p className="text-xs text-slate-400 mt-1">
                 {secondaryLabel}: {secondaryValue.toLocaleString('ru-RU')} ₽
+              </p>
+            )}
+            {extraValue !== undefined && (
+              <p className="text-xs text-orange-500 mt-1">
+                {extraLabel}: {extraValue.toLocaleString('ru-RU')} ₽
               </p>
             )}
           </div>
@@ -77,7 +85,8 @@ export default function Dashboard() {
   const [activeLegalEntity, setActiveLegalEntity] = useState<string>('all');
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract' | 'op_act' | 'op_payment'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; type: 'act' | 'contract' | 'op_act'; target: Operation | Contract | null; project?: Project; nextStatus?: string }>({ open: false, type: 'act', target: null });
+  const [paymentDialogOp, setPaymentDialogOp] = useState<Operation | null>(null);
 
   async function loadData() {
     const [ops, prjs, contrs, cats, sts, les] = await Promise.all([
@@ -121,9 +130,6 @@ export default function Dashboard() {
     } else if (confirmStatus.type === 'op_act') {
       const op = confirmStatus.target as Operation;
       await pocketbaseService.updateOperation(op.id, { act_status: (confirmStatus.nextStatus as Operation['act_status']) || op.act_status });
-    } else if (confirmStatus.type === 'op_payment') {
-      const op = confirmStatus.target as Operation;
-      await pocketbaseService.updateOperation(op.id, { payment_status: (confirmStatus.nextStatus as Operation['payment_status']) || op.payment_status });
     } else if (confirmStatus.type === 'contract' && confirmStatus.project) {
       const contract = confirmStatus.target as Contract;
       const next: Contract = { ...contract, status: (confirmStatus.nextStatus as Contract['status']) || contract.status };
@@ -141,18 +147,34 @@ export default function Dashboard() {
     const cash = operations.filter(o => o.view === 'Касса' && !o.is_archived);
 
     const sum = (data: Operation[], filter?: string) => {
-      const income = data.filter(o => o.type === 'Приход' && (!filter || o.act_status === filter || o.payment_status === filter))
-        .reduce((s, o) => s + o.amount, 0);
-      const expense = data.filter(o => o.type === 'Расход' && (!filter || o.act_status === filter || o.payment_status === filter))
-        .reduce((s, o) => s + o.amount, 0);
+      const matchesFilter = (o: Operation) => {
+        if (!filter) return true;
+        if (filter === 'Оплачен') {
+          if (o.payment_status === 'Оплачен') return true;
+          if (o.payment_status === 'Частично оплачен') return true;
+          return false;
+        }
+        return o.act_status === filter || o.payment_status === filter;
+      };
+      const income = data
+        .filter(o => o.type === 'Приход' && matchesFilter(o))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
+      const expense = data
+        .filter(o => o.type === 'Расход' && matchesFilter(o))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
       return income - expense;
     };
+
+    const partialCash = cash
+      .filter(o => o.payment_status === 'Частично оплачен')
+      .reduce((s, o) => s + (o.type === 'Приход' ? o.paid_amount : -o.paid_amount), 0);
 
     return {
       management: sum(mgmt),
       acts_signed: sum(acts, 'Подписан'),
       acts_gross: sum(acts),
       cash_paid: sum(cash, 'Оплачен'),
+      cash_partial: partialCash,
       cash_gross: sum(cash),
     };
   }, [operations]);
@@ -197,8 +219,12 @@ export default function Dashboard() {
       return { primary: signedIncome - signedExpense, secondary: gross };
     }
     if (openBlock === 'cash') {
-      const paidIncome = blockRecords.filter(o => o.type === 'Приход' && o.payment_status === 'Оплачен').reduce((s, o) => s + o.amount, 0);
-      const paidExpense = blockRecords.filter(o => o.type === 'Расход' && o.payment_status === 'Оплачен').reduce((s, o) => s + o.amount, 0);
+      const paidIncome = blockRecords
+        .filter(o => o.type === 'Приход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
+      const paidExpense = blockRecords
+        .filter(o => o.type === 'Расход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
       return { primary: paidIncome - paidExpense, secondary: gross };
     }
     return { primary: gross };
@@ -238,6 +264,8 @@ export default function Dashboard() {
           primaryValue={kpi.cash_paid}
           secondaryValue={kpi.cash_gross}
           secondaryLabel="Валовый"
+          extraValue={kpi.cash_partial}
+          extraLabel="Частично"
           color="bg-emerald-100 text-emerald-600"
           icon={<TrendingUp className="w-6 h-6" />}
           isOpen={openBlock === 'cash'}
@@ -334,12 +362,14 @@ export default function Dashboard() {
                           )}
                           {op.payment_status && openBlock === 'cash' && (
                             <Badge
-                              variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                              className={op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs cursor-pointer' : 'text-xs cursor-pointer'}
+                              variant={op.payment_status === 'Оплачен' ? 'default' : op.payment_status === 'Частично оплачен' ? 'secondary' : 'destructive'}
+                              className={`text-xs cursor-pointer ${
+                                op.payment_status === 'Оплачен' ? 'bg-emerald-500' :
+                                op.payment_status === 'Частично оплачен' ? 'bg-amber-500 text-white' : ''
+                              }`}
                               onClick={e => {
                                 e.stopPropagation();
-                                const next = op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен';
-                                setConfirmStatus({ open: true, type: 'op_payment', target: op, nextStatus: next });
+                                setPaymentDialogOp(op);
                               }}
                             >
                               {op.payment_status}
@@ -348,7 +378,14 @@ export default function Dashboard() {
                         </TableCell>
                       )}
                       <TableCell>{op.legal_entity_name || '—'}</TableCell>
-                      <TableCell className="text-right font-mono">{op.amount.toLocaleString('ru-RU')} ₽</TableCell>
+                      <TableCell className="text-right font-mono">
+                        <div>{op.amount.toLocaleString('ru-RU')} ₽</div>
+                        {op.payment_status === 'Частично оплачен' && (
+                          <div className="text-[10px] text-orange-500 leading-none">
+                            опл. {op.paid_amount.toLocaleString('ru-RU')} ₽
+                          </div>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                   {blockRecords.length === 0 && (
@@ -463,6 +500,13 @@ export default function Dashboard() {
         </Card>
       </div>
 
+      <PaymentStatusDialog
+        operation={paymentDialogOp}
+        open={!!paymentDialogOp}
+        onClose={() => setPaymentDialogOp(null)}
+        onSaved={loadData}
+      />
+
       <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, type: 'act', target: null })}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -470,9 +514,6 @@ export default function Dashboard() {
             <AlertDialogDescription>
               {(confirmStatus.type === 'act' || confirmStatus.type === 'op_act') && confirmStatus.target && (
                 <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>
-              )}
-              {confirmStatus.type === 'op_payment' && confirmStatus.target && (
-                <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>
               )}
               {confirmStatus.type === 'contract' && confirmStatus.target && (
                 <>Изменить статус договора «{(confirmStatus.target as Contract).number || '—'}» на «{confirmStatus.nextStatus}»?</>

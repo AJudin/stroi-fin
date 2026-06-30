@@ -102,6 +102,7 @@ function mapOperation(r: Record<string, unknown>): Operation {
     amount: Number(r.amount),
     act_status: r.act_status as Operation['act_status'],
     payment_status: r.payment_status as Operation['payment_status'],
+    paid_amount: Number(r.paid_amount || 0),
     is_archived: Boolean(r.is_archived),
     parent_id: r.parent_id ? String(r.parent_id) : null,
     created: String(r.created),
@@ -324,6 +325,7 @@ export const pocketbaseService = {
     if (!payload.category_id) delete payload.category_id;
     if (!payload.stage_id) delete payload.stage_id;
     if (!payload.legal_entity_id) delete payload.legal_entity_id;
+    if (payload.paid_amount === undefined) delete payload.paid_amount;
     if (!payload.parent_id) delete payload.parent_id;
     const r = await pb.collection('operations').create(payload);
     return mapOperation(r as Record<string, unknown>);
@@ -334,6 +336,7 @@ export const pocketbaseService = {
     if (payload.category_id === '') delete payload.category_id;
     if (payload.stage_id === '') delete payload.stage_id;
     if (payload.legal_entity_id === '') delete payload.legal_entity_id;
+    if (payload.paid_amount === undefined) delete payload.paid_amount;
     if (payload.parent_id === '' || payload.parent_id === null) delete payload.parent_id;
     const r = await pb.collection('operations').update(id, payload);
     return r ? mapOperation(r as Record<string, unknown>) : undefined;

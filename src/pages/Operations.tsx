@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import OperationFormDialog from '@/components/OperationFormDialog';
+import PaymentStatusDialog from '@/components/PaymentStatusDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -117,7 +118,8 @@ export default function Operations() {
   const [legalEntities, setLegalEntities] = useState<LegalEntity[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingOp, setEditingOp] = useState<Operation | null>(null);
-  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; target: Operation | null; field: 'act_status' | 'payment_status' | null; nextStatus?: string }>({ open: false, target: null, field: null });
+  const [confirmStatus, setConfirmStatus] = useState<{ open: boolean; target: Operation | null; field: 'act_status' | null; nextStatus?: string }>({ open: false, target: null, field: null });
+  const [paymentDialogOp, setPaymentDialogOp] = useState<Operation | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: SortKey | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'desc' });
 
@@ -296,6 +298,7 @@ export default function Operations() {
       'Моё ЮЛ': op.legal_entity_name || '',
       'Статус акта': op.act_status || '',
       'Статус оплаты': op.payment_status || '',
+      'Оплачено': op.payment_status === 'Частично оплачен' ? op.paid_amount : (op.payment_status === 'Оплачен' ? op.amount : 0),
       'Комментарий': op.comment,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -318,7 +321,7 @@ export default function Operations() {
 
   const handleConfirmStatus = async () => {
     if (!confirmStatus.target || !confirmStatus.field || !confirmStatus.nextStatus) return;
-    await pocketbaseService.updateOperation(confirmStatus.target.id, { [confirmStatus.field]: confirmStatus.nextStatus });
+    await pocketbaseService.updateOperation(confirmStatus.target.id, { act_status: confirmStatus.nextStatus as Operation['act_status'] });
     setConfirmStatus({ open: false, target: null, field: null });
     await loadData();
   };
@@ -519,6 +522,7 @@ export default function Operations() {
                   <SelectItem value="all">Все статусы</SelectItem>
                   <SelectItem value="Оплачен">Оплачен</SelectItem>
                   <SelectItem value="Не оплачен">Не оплачен</SelectItem>
+                  <SelectItem value="Частично оплачен">Частично оплачен</SelectItem>
                 </SelectContent>
               </Select>
             </FilterBadge>
@@ -656,7 +660,12 @@ export default function Operations() {
                     <TableCell className="text-sm">{op.category_name}</TableCell>
                     <TableCell className="text-sm">{op.stage_name}</TableCell>
                     <TableCell className={`text-right font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
-                      {op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽
+                      <div>{op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽</div>
+                      {op.payment_status === 'Частично оплачен' && (
+                        <div className="text-[10px] text-orange-500 font-normal leading-none">
+                          опл. {op.paid_amount.toLocaleString('ru-RU')} ₽
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm">{op.legal_entity_name}</TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
@@ -674,11 +683,14 @@ export default function Operations() {
                       )}
                       {op.payment_status && (
                         <Badge
-                          variant={op.payment_status === 'Оплачен' ? 'default' : 'secondary'}
-                          className={`${op.payment_status === 'Оплачен' ? 'bg-emerald-500 text-xs ml-1' : 'text-xs ml-1'} cursor-pointer`}
+                          variant={op.payment_status === 'Оплачен' ? 'default' : op.payment_status === 'Частично оплачен' ? 'secondary' : 'destructive'}
+                          className={`text-xs ml-1 cursor-pointer ${
+                            op.payment_status === 'Оплачен' ? 'bg-emerald-500' :
+                            op.payment_status === 'Частично оплачен' ? 'bg-amber-500 text-white' : ''
+                          }`}
                           onClick={e => {
                             e.stopPropagation();
-                            setConfirmStatus({ open: true, target: op, field: 'payment_status', nextStatus: op.payment_status === 'Оплачен' ? 'Не оплачен' : 'Оплачен' });
+                            setPaymentDialogOp(op);
                           }}
                         >
                           {op.payment_status}
@@ -715,13 +727,19 @@ export default function Operations() {
         onArchive={isAdmin ? handleArchiveEditing : undefined}
       />
 
+      <PaymentStatusDialog
+        operation={paymentDialogOp}
+        open={!!paymentDialogOp}
+        onClose={() => setPaymentDialogOp(null)}
+        onSaved={loadData}
+      />
+
       <AlertDialog open={confirmStatus.open} onOpenChange={(open) => !open && setConfirmStatus({ open: false, target: null, field: null })}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Подтвердите изменение статуса</AlertDialogTitle>
             <AlertDialogDescription>
               {confirmStatus.field === 'act_status' && <>Изменить статус акта на «{confirmStatus.nextStatus}»?</>}
-              {confirmStatus.field === 'payment_status' && <>Изменить статус оплаты на «{confirmStatus.nextStatus}»?</>}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
