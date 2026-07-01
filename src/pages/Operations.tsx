@@ -251,7 +251,7 @@ export default function Operations() {
       if (activeFilters.includes('counterparty') && filterValues.counterparty !== 'all' && op.counterparty_id !== filterValues.counterparty) return false;
       if (activeFilters.includes('category') && filterValues.category !== 'all' && op.category_id !== filterValues.category) return false;
       if (activeFilters.includes('stage') && filterValues.stage !== 'all' && op.stage_id !== filterValues.stage) return false;
-      if (activeFilters.includes('legalEntity') && filterValues.legalEntity !== 'all' && op.legal_entity_id !== filterValues.legalEntity) return false;
+      if (activeFilters.includes('legalEntity') && filterValues.legalEntity !== 'all' && op.legal_entity_id !== filterValues.legalEntity && op.target_legal_entity_id !== filterValues.legalEntity) return false;
       if (activeFilters.includes('actStatus') && filterValues.actStatus !== 'all' && op.act_status !== filterValues.actStatus) return false;
       if (activeFilters.includes('paymentStatus') && filterValues.paymentStatus !== 'all' && op.payment_status !== filterValues.paymentStatus) return false;
       if (activeFilters.includes('amount')) {
@@ -295,7 +295,7 @@ export default function Operations() {
       'Статья': op.category_name,
       'Этап': op.stage_name,
       'Сумма': op.amount,
-      'Моё ЮЛ': op.legal_entity_name || '',
+      'Моё ЮЛ': op.type === 'Перемещение' ? `${op.legal_entity_name || '—'} → ${op.target_legal_entity_name || '—'}` : (op.legal_entity_name || ''),
       'Статус акта': op.act_status || '',
       'Статус оплаты': op.payment_status || '',
       'Оплачено': op.payment_status === 'Частично оплачен' ? op.paid_amount : (op.payment_status === 'Оплачен' ? op.amount : 0),
@@ -422,6 +422,7 @@ export default function Operations() {
                   <SelectItem value="all">Все типы</SelectItem>
                   <SelectItem value="Приход">Приход</SelectItem>
                   <SelectItem value="Расход">Расход</SelectItem>
+                  <SelectItem value="Перемещение">Перемещение</SelectItem>
                 </SelectContent>
               </Select>
             </FilterBadge>
@@ -633,7 +634,7 @@ export default function Operations() {
                 {filteredOps.map(op => (
                   <TableRow
                     key={op.id}
-                    className="hover:bg-slate-50 cursor-pointer"
+                    className={`hover:bg-slate-50 cursor-pointer ${op.type === 'Перемещение' ? 'bg-blue-50/60' : ''}`}
                     onClick={() => { setEditingOp(op); setIsFormOpen(true); }}
                   >
                     <TableCell className="text-sm">{new Date(op.date).toLocaleDateString('ru-RU')}</TableCell>
@@ -652,22 +653,34 @@ export default function Operations() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge className={op.type === 'Приход' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : 'bg-red-100 text-red-700 hover:bg-red-100'}>
+                      <Badge className={
+                        op.type === 'Приход' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' :
+                        op.type === 'Расход' ? 'bg-red-100 text-red-700 hover:bg-red-100' :
+                        'bg-blue-100 text-blue-700 hover:bg-blue-100'
+                      }>
                         {op.type}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm">{op.counterparty_name}</TableCell>
                     <TableCell className="text-sm">{op.category_name}</TableCell>
                     <TableCell className="text-sm">{op.stage_name}</TableCell>
-                    <TableCell className={`text-right font-mono font-medium ${op.type === 'Приход' ? 'text-emerald-600' : 'text-red-600'}`}>
-                      <div>{op.type === 'Приход' ? '+' : '-'}{op.amount.toLocaleString('ru-RU')} ₽</div>
+                    <TableCell className={`text-right font-mono font-medium ${
+                      op.type === 'Приход' ? 'text-emerald-600' :
+                      op.type === 'Расход' ? 'text-red-600' :
+                      'text-blue-600'
+                    }`}>
+                      <div>{op.type === 'Перемещение' ? '' : (op.type === 'Приход' ? '+' : '-')}{op.amount.toLocaleString('ru-RU')} ₽</div>
                       {op.payment_status === 'Частично оплачен' && (
                         <div className="text-[10px] text-orange-500 font-normal leading-none">
                           опл. {op.paid_amount.toLocaleString('ru-RU')} ₽
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-sm">{op.legal_entity_name}</TableCell>
+                    <TableCell className="text-sm">
+                      {op.type === 'Перемещение'
+                        ? `${op.legal_entity_name || '—'} → ${op.target_legal_entity_name || '—'}`
+                        : op.legal_entity_name}
+                    </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       {op.act_status && (
                         <Badge
@@ -721,6 +734,7 @@ export default function Operations() {
         categories={categories}
         stages={stages}
         legalEntities={legalEntities}
+        cashOperations={operations}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
         onLegalEntityCreated={handleLegalEntityCreated}

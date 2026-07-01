@@ -203,37 +203,48 @@ export default function Dashboard() {
     return operations.filter(o => {
       if (o.view !== currentView || o.is_archived) return false;
       if ((openBlock === 'acts' || openBlock === 'cash') && activeLegalEntity !== 'all') {
-        return o.legal_entity_id === activeLegalEntity;
+        return o.legal_entity_id === activeLegalEntity || (o.type === 'Перемещение' && o.target_legal_entity_id === activeLegalEntity);
       }
       return true;
     });
   }, [operations, openBlock, currentView, activeLegalEntity]);
 
-  const getBlockBalance = useMemo(() => (records: Operation[]) => {
-    const income = records.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
-    const expense = records.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
-    const gross = income - expense;
-    if (openBlock === 'acts') {
-      const signedIncome = records.filter(o => o.type === 'Приход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
-      const signedExpense = records.filter(o => o.type === 'Расход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
-      return { primary: signedIncome - signedExpense, gross };
-    }
-    if (openBlock === 'cash') {
-      const paidIncome = records
-        .filter(o => o.type === 'Приход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
-        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
-      const paidExpense = records
-        .filter(o => o.type === 'Расход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
-        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
-      return { primary: paidIncome - paidExpense, gross };
-    }
-    return { primary: gross, gross };
+  const getBlockBalance = useMemo(() => (records: Operation[], entityId?: string) => {
+    let gross = 0;
+    let primary = 0;
+    const forEntity = entityId && entityId !== 'all';
+    records.forEach(o => {
+      if (o.type === 'Перемещение') {
+        if (forEntity) {
+          if (o.legal_entity_id === entityId) {
+            gross -= o.amount;
+            primary -= o.amount;
+          } else if (o.target_legal_entity_id === entityId) {
+            gross += o.amount;
+            primary += o.amount;
+          }
+        }
+        return;
+      }
+      const sign = o.type === 'Приход' ? 1 : -1;
+      gross += sign * o.amount;
+      if (openBlock === 'management') {
+        primary += sign * o.amount;
+      } else if (openBlock === 'acts') {
+        if (o.act_status === 'Подписан') primary += sign * o.amount;
+      } else if (openBlock === 'cash') {
+        if (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен') {
+          primary += sign * (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount);
+        }
+      }
+    });
+    return { primary, gross };
   }, [openBlock]);
 
   const blockBalance = useMemo(() => {
-    const { primary, gross } = getBlockBalance(blockRecords);
+    const { primary, gross } = getBlockBalance(blockRecords, activeLegalEntity);
     return openBlock === 'management' ? { primary: gross } : { primary, secondary: gross };
-  }, [blockRecords, openBlock, getBlockBalance]);
+  }, [blockRecords, activeLegalEntity, openBlock, getBlockBalance]);
 
   const viewBlockRecords = useMemo(() => {
     if (!openBlock) return [];
@@ -241,9 +252,9 @@ export default function Dashboard() {
   }, [operations, openBlock, currentView]);
 
   const entityBalances = useMemo(() => {
-    const map: Record<string, { primary: number; gross: number }> = { all: getBlockBalance(viewBlockRecords) };
+    const map: Record<string, { primary: number; gross: number }> = { all: getBlockBalance(viewBlockRecords, 'all') };
     legalEntities.forEach(le => {
-      map[le.id] = getBlockBalance(viewBlockRecords.filter(o => o.legal_entity_id === le.id));
+      map[le.id] = getBlockBalance(viewBlockRecords, le.id);
     });
     return map;
   }, [viewBlockRecords, legalEntities, getBlockBalance]);
@@ -436,6 +447,7 @@ export default function Dashboard() {
         legalEntities={legalEntities}
         categories={categories.map(c => ({ id: c.id, name: c.name, type: c.type }))}
         stages={stages.map(s => ({ id: s.id, name: s.name }))}
+        cashOperations={operations}
         onSaved={loadData}
         onCounterpartyCreated={handleCounterpartyCreated}
         onLegalEntityCreated={handleLegalEntityCreated}

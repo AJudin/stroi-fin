@@ -66,7 +66,7 @@ function mapProject(r: Record<string, unknown>): Project {
   return {
     id: String(r.id),
     name: String(r.name),
-    counterparty_id: String(r.counterparty_id),
+    counterparty_id: r.counterparty_id ? String(r.counterparty_id) : '',
     counterparty_name: expandName(r, 'counterparty_id'),
     legal_entity_id: r.legal_entity_id ? String(r.legal_entity_id) : undefined,
     legal_entity_name: expandName(r, 'legal_entity_id'),
@@ -86,11 +86,11 @@ function mapOperation(r: Record<string, unknown>): Operation {
     id: String(r.id),
     date: rawDate ? rawDate.slice(0, 10) : '',
     week: Number(r.week),
-    project_id: String(r.project_id),
+    project_id: r.project_id ? String(r.project_id) : '',
     project_name: expandName(r, 'project_id'),
     view: r.view as Operation['view'],
     type: r.type as Operation['type'],
-    counterparty_id: String(r.counterparty_id),
+    counterparty_id: r.counterparty_id ? String(r.counterparty_id) : '',
     counterparty_name: expandName(r, 'counterparty_id'),
     category_id: r.category_id ? String(r.category_id) : '',
     category_name: expandName(r, 'category_id'),
@@ -98,6 +98,8 @@ function mapOperation(r: Record<string, unknown>): Operation {
     stage_name: expandName(r, 'stage_id'),
     legal_entity_id: r.legal_entity_id ? String(r.legal_entity_id) : undefined,
     legal_entity_name: expandName(r, 'legal_entity_id'),
+    target_legal_entity_id: r.target_legal_entity_id ? String(r.target_legal_entity_id) : undefined,
+    target_legal_entity_name: expandName(r, 'target_legal_entity_id'),
     comment: String(r.comment || ''),
     amount: Number(r.amount),
     act_status: r.act_status as Operation['act_status'],
@@ -306,14 +308,14 @@ export const pocketbaseService = {
     if (filters?.legal_entity_id) parts.push(`legal_entity_id = "${filters.legal_entity_id}"`);
     const res = await pb.collection('operations').getFullList({
       filter: parts.join(' && '),
-      expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id',
+      expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id,target_legal_entity_id',
       sort: '-date',
     });
     return res.map(mapOperation);
   },
   getOperation: async (id: string): Promise<Operation | null> => {
     try {
-      const r = await pb.collection('operations').getOne(id, { expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id' });
+      const r = await pb.collection('operations').getOne(id, { expand: 'project_id,counterparty_id,category_id,stage_id,legal_entity_id,target_legal_entity_id' });
       return mapOperation(r as Record<string, unknown>);
     } catch { return null; }
   },
@@ -322,9 +324,12 @@ export const pocketbaseService = {
       ...data,
       week: getWeekNumber(data.date),
     };
+    if (!payload.project_id) delete payload.project_id;
+    if (!payload.counterparty_id) delete payload.counterparty_id;
     if (!payload.category_id) delete payload.category_id;
     if (!payload.stage_id) delete payload.stage_id;
     if (!payload.legal_entity_id) delete payload.legal_entity_id;
+    if (!payload.target_legal_entity_id) delete payload.target_legal_entity_id;
     if (payload.paid_amount === undefined) delete payload.paid_amount;
     if (!payload.parent_id) delete payload.parent_id;
     const r = await pb.collection('operations').create(payload);
@@ -333,9 +338,12 @@ export const pocketbaseService = {
   updateOperation: async (id: string, data: Partial<Operation>): Promise<Operation | undefined> => {
     const payload: Record<string, unknown> = { ...data };
     if (data.date) payload.week = getWeekNumber(data.date);
+    if (payload.project_id === '' || payload.project_id === null) delete payload.project_id;
+    if (payload.counterparty_id === '' || payload.counterparty_id === null) delete payload.counterparty_id;
     if (payload.category_id === '') delete payload.category_id;
     if (payload.stage_id === '') delete payload.stage_id;
     if (payload.legal_entity_id === '') delete payload.legal_entity_id;
+    if (payload.target_legal_entity_id === '' || payload.target_legal_entity_id === null) delete payload.target_legal_entity_id;
     if (payload.paid_amount === undefined) delete payload.paid_amount;
     if (payload.parent_id === '' || payload.parent_id === null) delete payload.parent_id;
     const r = await pb.collection('operations').update(id, payload);

@@ -20,6 +20,7 @@ interface OperationFormDialogProps {
   legalEntities: LegalEntity[];
   categories: { id: string; name: string; type: string }[];
   stages: { id: string; name: string }[];
+  cashOperations?: Operation[];
   onSaved: () => void;
   onCounterpartyCreated: (c: Counterparty) => void;
   onLegalEntityCreated: (le: LegalEntity) => void;
@@ -29,14 +30,17 @@ interface OperationFormDialogProps {
 const ALL_VIEWS = ['Управленческий учёт', 'Актирование', 'Касса'] as const;
 
 export default function OperationFormDialog({
-  open, onClose, operation, projects, counterparties, legalEntities, categories, stages, onSaved, onCounterpartyCreated, onLegalEntityCreated, onArchive,
+  open, onClose, operation, projects, counterparties, legalEntities, categories, stages, cashOperations, onSaved, onCounterpartyCreated, onLegalEntityCreated, onArchive,
 }: OperationFormDialogProps) {
   const [projectId, setProjectId] = useState(operation?.project_id || '');
   const [date, setDate] = useState(operation?.date || new Date().toISOString().split('T')[0]);
   const [views, setViews] = useState<string[]>(operation ? [operation.view] : ['Управленческий учёт']);
-  const [type, setType] = useState<'Приход' | 'Расход'>(operation?.type || 'Приход');
+  const [type, setType] = useState<'Приход' | 'Расход' | 'Перемещение'>(operation?.type || 'Приход');
   const [counterpartyId, setCounterpartyId] = useState(operation?.counterparty_id || '');
   const [legalEntityId, setLegalEntityId] = useState(operation?.legal_entity_id || '');
+  const [isTransfer, setIsTransfer] = useState(operation?.type === 'Перемещение');
+  const [sourceLegalEntityId, setSourceLegalEntityId] = useState(operation?.legal_entity_id || '');
+  const [targetLegalEntityId, setTargetLegalEntityId] = useState(operation?.target_legal_entity_id || '');
   const [categoryId, setCategoryId] = useState(operation?.category_id || '');
   const [stageId, setStageId] = useState(operation?.stage_id || '');
   const [amount, setAmount] = useState(operation?.amount?.toString() || '');
@@ -57,6 +61,25 @@ export default function OperationFormDialog({
 
   const project = useMemo(() => projects.find(p => p.id === projectId), [projects, projectId]);
   const needsLegalEntity = views.some(v => v === 'Актирование' || v === 'Касса');
+
+  const getCashBalance = useMemo(() => (entityId?: string) => {
+    if (!entityId || !cashOperations) return undefined;
+    return cashOperations.reduce((s, o) => {
+      if (o.view !== 'Касса' || o.is_archived) return s;
+      if (o.type === 'Перемещение') {
+        if (o.legal_entity_id === entityId) return s - o.amount;
+        if (o.target_legal_entity_id === entityId) return s + o.amount;
+        return s;
+      }
+      if (o.type === 'Приход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен')) {
+        return s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount);
+      }
+      if (o.type === 'Расход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен')) {
+        return s - (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount);
+      }
+      return s;
+    }, 0);
+  }, [cashOperations]);
 
   // Auto-select customer counterparty for income operations
   useEffect(() => {
@@ -86,12 +109,16 @@ export default function OperationFormDialog({
 
   useEffect(() => {
     if (open) {
+      const transferMode = operation?.type === 'Перемещение';
+      setIsTransfer(transferMode);
       setProjectId(operation?.project_id || '');
       setDate(operation?.date || new Date().toISOString().split('T')[0]);
       setViews(operation ? [operation.view] : ['Управленческий учёт']);
       setType(operation?.type || 'Приход');
       setCounterpartyId(operation?.counterparty_id || '');
       setLegalEntityId(operation?.legal_entity_id || '');
+      setSourceLegalEntityId(operation?.legal_entity_id || '');
+      setTargetLegalEntityId(operation?.target_legal_entity_id || '');
       setCategoryId(operation?.category_id || '');
       setStageId(operation?.stage_id || '');
       setAmount(operation?.amount?.toString() || '');
@@ -124,6 +151,33 @@ export default function OperationFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
+
+    if (isTransfer) {
+      const sourceBalance = getCashBalance(sourceLegalEntityId);
+      const isValid = numAmount && sourceLegalEntityId && targetLegalEntityId && sourceLegalEntityId !== targetLegalEntityId &&
+        (sourceBalance === undefined || numAmount <= sourceBalance);
+      if (!isValid) return;
+      const data: any = {
+        date,
+        view: 'Касса',
+        type: 'Перемещение',
+        amount: numAmount,
+        comment,
+        legal_entity_id: sourceLegalEntityId,
+        target_legal_entity_id: targetLegalEntityId,
+        is_archived: false,
+        paid_amount: 0,
+      };
+      if (operation) {
+        await pocketbaseService.updateOperation(operation.id, data);
+      } else {
+        await pocketbaseService.createOperation(data);
+      }
+      onSaved();
+      onClose();
+      return;
+    }
+
     const isValid = numAmount && projectId && counterpartyId && categoryId && stageId && views.length > 0 && (!needsLegalEntity || legalEntityId);
     setViewError(views.length === 0);
     if (!isValid) return;
@@ -248,130 +302,199 @@ export default function OperationFormDialog({
                 <Label>Дата</Label>
                 <Input type="date" value={date} onChange={e => setDate(e.target.value)} required />
               </div>
-              <div className="space-y-1.5">
-                <Label>Проект</Label>
-                <Select value={projectId} onValueChange={setProjectId} required>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Вид операции</Label>
-              <div className="flex gap-2 flex-wrap">
-                {['Управленческий учёт', 'Актирование', 'Касса'].map(v => (
-                  <Button
-                    key={v}
-                    type="button"
-                    variant={views.includes(v) ? 'default' : 'outline'}
-                    size="sm"
-                    className={views.includes(v) ? 'bg-emerald-600' : ''}
-                    onClick={() => { setViews(views.includes(v) ? views.filter(x => x !== v) : [...views, v]); setViewError(false); }}
-                    disabled={!!operation}
-                  >
-                    {v}
-                  </Button>
-                ))}
-              </div>
-              {operation && <p className="text-xs text-slate-400">Вид нельзя изменить при редактировании</p>}
-              {viewError && <p className="text-xs text-red-500">Выберите хотя бы один вид операции</p>}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Тип</Label>
-                <Select value={type} onValueChange={(v) => setType(v as 'Приход' | 'Расход')} required>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Приход">Приход</SelectItem>
-                    <SelectItem value="Расход">Расход</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Контрагент</Label>
-                <CounterpartySelect
-                  value={counterpartyId}
-                  onChange={setCounterpartyId}
-                  counterparties={counterparties}
-                  onCreated={onCounterpartyCreated}
-                  preferredId={type === 'Приход' && project ? project.counterparty_id : undefined}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Статья</Label>
-                <Select value={categoryId} onValueChange={setCategoryId} required>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {availableCategories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Этап</Label>
-                <Select value={stageId} onValueChange={setStageId} required>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {stages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Моё юридическое лицо</Label>
-              <LegalEntitySelect
-                value={legalEntityId}
-                onChange={setLegalEntityId}
-                legalEntities={legalEntities}
-                onCreated={onLegalEntityCreated}
-                required={needsLegalEntity}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Сумма</Label>
-              <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} required />
-            </div>
-
-            {views.includes('Актирование') && (
-              <div className="space-y-1.5">
-                <Label>Статус акта</Label>
-                <Select value={actStatus} onValueChange={(v) => setActStatus(v as 'Подписан' | 'Не подписан')}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Подписан">Подписан</SelectItem>
-                    <SelectItem value="Не подписан">Не подписан</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {views.includes('Касса') && (
-              <>
+              {!isTransfer && (
                 <div className="space-y-1.5">
-                  <Label>Статус оплаты</Label>
-                  <Select value={paymentStatus} onValueChange={(v) => setPaymentStatus(v as NonNullable<Operation['payment_status']>)}>
+                  <Label>Проект</Label>
+                  <Select value={projectId} onValueChange={setProjectId} required>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Оплачен">Оплачен</SelectItem>
-                      <SelectItem value="Не оплачен">Не оплачен</SelectItem>
-                      <SelectItem value="Частично оплачен">Частично оплачен</SelectItem>
+                      {projects.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
-                {paymentStatus === 'Частично оплачен' && (
+              )}
+            </div>
+
+            {!operation && (
+              <div className="space-y-1.5">
+                <Label>Режим</Label>
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    variant={!isTransfer ? 'default' : 'outline'}
+                    size="sm"
+                    className={!isTransfer ? 'bg-emerald-600' : ''}
+                    onClick={() => setIsTransfer(false)}
+                  >
+                    Обычная операция
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={isTransfer ? 'default' : 'outline'}
+                    size="sm"
+                    className={isTransfer ? 'bg-blue-600' : ''}
+                    onClick={() => setIsTransfer(true)}
+                  >
+                    Перемещение ДС
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {isTransfer ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label>Оплаченная сумма</Label>
-                    <Input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} required />
+                    <Label>Откуда (ЮЛ)</Label>
+                    <LegalEntitySelect
+                      value={sourceLegalEntityId}
+                      onChange={setSourceLegalEntityId}
+                      legalEntities={legalEntities}
+                      onCreated={onLegalEntityCreated}
+                      required
+                    />
+                    {sourceLegalEntityId && (
+                      <p className="text-xs text-slate-500">
+                        Текущий остаток: <span className="font-medium">{getCashBalance(sourceLegalEntityId)?.toLocaleString('ru-RU') ?? '—'} ₽</span>
+                      </p>
+                    )}
                   </div>
+                  <div className="space-y-1.5">
+                    <Label>Куда (ЮЛ)</Label>
+                    <LegalEntitySelect
+                      value={targetLegalEntityId}
+                      onChange={setTargetLegalEntityId}
+                      legalEntities={legalEntities}
+                      onCreated={onLegalEntityCreated}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Сумма</Label>
+                  <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} required />
+                  {sourceLegalEntityId && Number(amount) > (getCashBalance(sourceLegalEntityId) ?? 0) && (
+                    <p className="text-xs text-red-500">Сумма превышает доступный остаток</p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Вид операции</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {['Управленческий учёт', 'Актирование', 'Касса'].map(v => (
+                      <Button
+                        key={v}
+                        type="button"
+                        variant={views.includes(v) ? 'default' : 'outline'}
+                        size="sm"
+                        className={views.includes(v) ? 'bg-emerald-600' : ''}
+                        onClick={() => { setViews(views.includes(v) ? views.filter(x => x !== v) : [...views, v]); setViewError(false); }}
+                        disabled={!!operation}
+                      >
+                        {v}
+                      </Button>
+                    ))}
+                  </div>
+                  {operation && <p className="text-xs text-slate-400">Вид нельзя изменить при редактировании</p>}
+                  {viewError && <p className="text-xs text-red-500">Выберите хотя бы один вид операции</p>}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Тип</Label>
+                    <Select value={type} onValueChange={(v) => setType(v as 'Приход' | 'Расход')} required>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Приход">Приход</SelectItem>
+                        <SelectItem value="Расход">Расход</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Контрагент</Label>
+                    <CounterpartySelect
+                      value={counterpartyId}
+                      onChange={setCounterpartyId}
+                      counterparties={counterparties}
+                      onCreated={onCounterpartyCreated}
+                      preferredId={type === 'Приход' && project ? project.counterparty_id : undefined}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Статья</Label>
+                    <Select value={categoryId} onValueChange={setCategoryId} required>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {availableCategories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Этап</Label>
+                    <Select value={stageId} onValueChange={setStageId} required>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {stages.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Моё юридическое лицо</Label>
+                  <LegalEntitySelect
+                    value={legalEntityId}
+                    onChange={setLegalEntityId}
+                    legalEntities={legalEntities}
+                    onCreated={onLegalEntityCreated}
+                    required={needsLegalEntity}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Сумма</Label>
+                  <Input type="number" value={amount} onChange={e => setAmount(e.target.value)} required />
+                </div>
+
+                {views.includes('Актирование') && (
+                  <div className="space-y-1.5">
+                    <Label>Статус акта</Label>
+                    <Select value={actStatus} onValueChange={(v) => setActStatus(v as 'Подписан' | 'Не подписан')}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Подписан">Подписан</SelectItem>
+                        <SelectItem value="Не подписан">Не подписан</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {views.includes('Касса') && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label>Статус оплаты</Label>
+                      <Select value={paymentStatus} onValueChange={(v) => setPaymentStatus(v as NonNullable<Operation['payment_status']>)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Оплачен">Оплачен</SelectItem>
+                          <SelectItem value="Не оплачен">Не оплачен</SelectItem>
+                          <SelectItem value="Частично оплачен">Частично оплачен</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {paymentStatus === 'Частично оплачен' && (
+                      <div className="space-y-1.5">
+                        <Label>Оплаченная сумма</Label>
+                        <Input type="number" value={paidAmount} onChange={e => setPaidAmount(e.target.value)} required />
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}

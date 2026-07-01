@@ -75,7 +75,7 @@ export interface Operation {
   project_id: string;
   project_name?: string;
   view: 'Управленческий учёт' | 'Актирование' | 'Касса';
-  type: 'Приход' | 'Расход';
+  type: 'Приход' | 'Расход' | 'Перемещение';
   counterparty_id: string;
   counterparty_name?: string;
   category_id: string;
@@ -84,6 +84,8 @@ export interface Operation {
   stage_name?: string;
   legal_entity_id?: string;
   legal_entity_name?: string;
+  target_legal_entity_id?: string;
+  target_legal_entity_name?: string;
   comment: string;
   amount: number;
   act_status: 'Подписан' | 'Не подписан' | null;
