@@ -209,26 +209,41 @@ export default function Dashboard() {
     });
   }, [operations, openBlock, currentView, activeLegalEntity]);
 
+  const getPrimaryBalance = useMemo(() => (records: Operation[]) => {
+    if (openBlock === 'acts') {
+      const signedIncome = records.filter(o => o.type === 'Приход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
+      const signedExpense = records.filter(o => o.type === 'Расход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
+      return signedIncome - signedExpense;
+    }
+    if (openBlock === 'cash') {
+      const paidIncome = records
+        .filter(o => o.type === 'Приход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
+      const paidExpense = records
+        .filter(o => o.type === 'Расход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
+        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
+      return paidIncome - paidExpense;
+    }
+    const income = records.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
+    const expense = records.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
+    return income - expense;
+  }, [openBlock]);
+
   const blockBalance = useMemo(() => {
     const income = blockRecords.filter(o => o.type === 'Приход').reduce((s, o) => s + o.amount, 0);
     const expense = blockRecords.filter(o => o.type === 'Расход').reduce((s, o) => s + o.amount, 0);
     const gross = income - expense;
-    if (openBlock === 'acts') {
-      const signedIncome = blockRecords.filter(o => o.type === 'Приход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
-      const signedExpense = blockRecords.filter(o => o.type === 'Расход' && o.act_status === 'Подписан').reduce((s, o) => s + o.amount, 0);
-      return { primary: signedIncome - signedExpense, secondary: gross };
-    }
-    if (openBlock === 'cash') {
-      const paidIncome = blockRecords
-        .filter(o => o.type === 'Приход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
-        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
-      const paidExpense = blockRecords
-        .filter(o => o.type === 'Расход' && (o.payment_status === 'Оплачен' || o.payment_status === 'Частично оплачен'))
-        .reduce((s, o) => s + (o.payment_status === 'Частично оплачен' ? o.paid_amount : o.amount), 0);
-      return { primary: paidIncome - paidExpense, secondary: gross };
-    }
-    return { primary: gross };
-  }, [blockRecords, openBlock]);
+    const primary = getPrimaryBalance(blockRecords);
+    return openBlock === 'management' ? { primary: gross } : { primary, secondary: gross };
+  }, [blockRecords, openBlock, getPrimaryBalance]);
+
+  const entityBalances = useMemo(() => {
+    const map: Record<string, number> = { all: getPrimaryBalance(blockRecords) };
+    legalEntities.forEach(le => {
+      map[le.id] = getPrimaryBalance(blockRecords.filter(o => o.legal_entity_id === le.id));
+    });
+    return map;
+  }, [blockRecords, legalEntities, getPrimaryBalance]);
 
   const activeLegalEntityName = useMemo(() => {
     if (activeLegalEntity === 'all') return 'Все ЮЛ';
@@ -286,10 +301,16 @@ export default function Dashboard() {
               </CardTitle>
               {(openBlock === 'acts' || openBlock === 'cash') && legalEntities.length > 0 && (
                 <Tabs value={activeLegalEntity} onValueChange={setActiveLegalEntity}>
-                  <TabsList className="h-8 flex-wrap">
-                    <TabsTrigger value="all" className="text-xs">Все</TabsTrigger>
+                  <TabsList className="h-auto flex-wrap py-1">
+                    <TabsTrigger value="all" className="text-xs flex flex-col items-center leading-tight py-1 px-2">
+                      <span>Все</span>
+                      <span className="text-[9px] text-slate-500">{entityBalances['all']?.toLocaleString('ru-RU')} ₽</span>
+                    </TabsTrigger>
                     {legalEntities.map(le => (
-                      <TabsTrigger key={le.id} value={le.id} className="text-xs">{le.name}</TabsTrigger>
+                      <TabsTrigger key={le.id} value={le.id} className="text-xs flex flex-col items-center leading-tight py-1 px-2">
+                        <span>{le.name}</span>
+                        <span className="text-[9px] text-slate-500">{entityBalances[le.id]?.toLocaleString('ru-RU')} ₽</span>
+                      </TabsTrigger>
                     ))}
                   </TabsList>
                 </Tabs>
